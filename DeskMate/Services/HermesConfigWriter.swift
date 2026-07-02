@@ -616,6 +616,66 @@ final class HermesConfigWriter {
         return nil
     }
 
+    // MARK: - Generic env write / remove
+
+    /// 写入/更新多个 env 变量。
+    ///
+    /// - value 为 nil 或空字符串时移除对应键（与 `writeApiKeyToEnv` 行为一致）。
+    /// - 调用方负责先调用 `removeEnvVarsWithPrefix` 清理旧字段，避免残留。
+    func writeEnvVars(_ vars: [(key: String, value: String?)]) {
+        ensureDirectoryExists(path: hermesHome)
+        let oldContent = readFileOrEmpty(path: envPath)
+        var lines = oldContent.isEmpty ? [] : oldContent.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+
+        for (key, value) in vars {
+            var foundIndex: Int? = nil
+            for (i, line) in lines.enumerated() {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if trimmed.hasPrefix("\(key)=") {
+                    foundIndex = i
+                    break
+                }
+            }
+            if let idx = foundIndex {
+                if let v = value, !v.isEmpty {
+                    lines[idx] = "\(key)=\(v)"
+                } else {
+                    lines.remove(at: idx)
+                }
+            } else {
+                if let v = value, !v.isEmpty {
+                    lines.append("\(key)=\(v)")
+                }
+            }
+        }
+
+        let newContent = lines.joined(separator: "\n") + (lines.isEmpty ? "" : "\n")
+        do {
+            try newContent.write(toFile: envPath, atomically: true, encoding: .utf8)
+            DMLogger.log("[writeEnvVars] wrote \(vars.count) keys to env", name: "HermesConfigWriter")
+        } catch {
+            DMLogger.error("[writeEnvVars] failed: \(error.localizedDescription)", name: "HermesConfigWriter")
+        }
+    }
+
+    /// 移除所有以指定前缀开头的 env 变量（如 `FEISHU_` / `WEIXIN_`）。
+    func removeEnvVarsWithPrefix(_ prefix: String) {
+        let oldContent = readFileOrEmpty(path: envPath)
+        guard !oldContent.isEmpty else { return }
+        var lines = oldContent.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        lines.removeAll { line in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            return trimmed.hasPrefix("\(prefix)")
+        }
+        let newContent = lines.joined(separator: "\n") + (lines.isEmpty ? "" : "\n")
+        do {
+            try newContent.write(toFile: envPath, atomically: true, encoding: .utf8)
+            DMLogger.log("[removeEnvVarsWithPrefix] removed \(prefix)*", name: "HermesConfigWriter")
+        } catch {
+            DMLogger.error("[removeEnvVarsWithPrefix] failed: \(error.localizedDescription)", name: "HermesConfigWriter")
+        }
+    }
+
     // MARK: - YAML helpers
 
     /// 读取文件内容（不存在返回空串）。

@@ -15,6 +15,7 @@ struct InstallEngineStepView: View {
     let showMirrorPrompt: Bool
     let isConfiguringMirror: Bool
     let mirrorUrl: String?
+    let installLogTail: String?
     let onCancel: (() -> Void)?
     let onConfigureMirror: (() -> Void)?
     let onDismissMirror: (() -> Void)?
@@ -284,10 +285,32 @@ struct InstallEngineStepView: View {
 
             Spacer().frame(height: 12)
 
-            // Speed & ETA
-            Text("下载速度: \(speed) · 预计剩余时间: \(eta)")
+            // Status & elapsed（不再使用"下载速度/预计剩余时间"误导词）
+            Text("状态: \(speed) · \(eta)")
                 .font(.caption)
                 .foregroundColor(.secondary.opacity(0.6))
+
+            // 实时安装日志区：展示真实 install.sh 输出，替代假进度条观感
+            if let tail = installLogTail, !tail.isEmpty {
+                ScrollView {
+                    Text(tail)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(height: 78)
+                .padding(8)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.primary.opacity(0.04))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                        )
+                )
+                .frame(maxWidth: 400)
+                .padding(.top, 4)
+            }
 
             Spacer().frame(height: 20)
 

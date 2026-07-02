@@ -30,6 +30,9 @@ final class AiChatViewModel: ObservableObject {
     /// SSE 流缓冲（与 Flutter `_streamBuffer` 等价）。
     private var streamBuffer: String = ""
 
+    /// 灵动岛工作态是否已触发 — 首个 deltaChunk 时设为 true，结束后复位
+    private var hasStartedWorking: Bool = false
+
     init(
         gateway: GatewayClient? = nil,
         modelConfigService: ModelConfigService? = nil,
@@ -128,6 +131,9 @@ final class AiChatViewModel: ObservableObject {
         model.streamingContent = nil
         model.toolProgressEvents = []
 
+        // 防御性复位工作态 — 避免上一次未正确清理导致重复触发
+        hasStartedWorking = false
+
         DMLogger.log(
             "[DEBUG] sendMessage: state updated, " +
             "messages count=\(model.messages.count), " +
@@ -178,6 +184,11 @@ final class AiChatViewModel: ObservableObject {
             model.sessionId = sessionId
 
         case .deltaChunk(let text):
+            // 首个 deltaChunk 触发灵动岛工作态（与 think 动画结束同步）
+            if !hasStartedWorking {
+                hasStartedWorking = true
+                DynamicNotchManager.shared.startWorking()
+            }
             streamBuffer.append(text)
             DMLogger.log(
                 "[DEBUG] DeltaChunk: text=\"\(text)\", buffer length=\(streamBuffer.count)",
@@ -276,6 +287,12 @@ final class AiChatViewModel: ObservableObject {
         model.toolProgressEvents = []
         model.isLoading = false
         model.connectionState = .completed
+
+        // 流结束 → 收回灵动岛工作态
+        if hasStartedWorking {
+            hasStartedWorking = false
+            DynamicNotchManager.shared.stopWorking()
+        }
 
         DMLogger.log(
             "[DEBUG] _onStreamDone: state updated, " +
@@ -393,6 +410,12 @@ final class AiChatViewModel: ObservableObject {
         model.isLoading = false
         model.connectionState = .idle
         streamBuffer = ""
+
+        // 手动停止 → 收回灵动岛工作态
+        if hasStartedWorking {
+            hasStartedWorking = false
+            DynamicNotchManager.shared.stopWorking()
+        }
 
         DMLogger.log(
             "[DEBUG] stopStream: state reset, connectionState -> idle",
@@ -606,6 +629,12 @@ final class AiChatViewModel: ObservableObject {
         model.errorMessage = message
         model.streamingContent = nil
         streamBuffer = ""
+
+        // 错误 → 收回灵动岛工作态
+        if hasStartedWorking {
+            hasStartedWorking = false
+            DynamicNotchManager.shared.stopWorking()
+        }
     }
 
     /// 格式化当前时间为 `HH:mm` — 对齐 Flutter `_nowTime`。

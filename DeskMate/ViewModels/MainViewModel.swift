@@ -34,6 +34,7 @@ final class MainViewModel: ObservableObject {
         case "task-board":          return "任务看板"
         case "model-config":        return "模型配置"
         case "skill-management":    return "技能管理"
+        case "gateway-config":      return "网关配置"
         case "settings":            return "设置"
         default:                    return id
         }
@@ -64,6 +65,7 @@ final class MainViewModel: ObservableObject {
                 SidebarNavItem(id: "task-board", labelKey: "sidebarTaskBoard", iconName: "rectangle.split.3x1", sectionKey: "sidebarTools"),
                 SidebarNavItem(id: "model-config", labelKey: "sidebarModelConfig", iconName: "cpu", sectionKey: "sidebarTools"),
                 SidebarNavItem(id: "skill-management", labelKey: "sidebarSkillManagement", iconName: "sparkles", sectionKey: "sidebarTools"),
+                SidebarNavItem(id: "gateway-config", labelKey: "sidebarGatewayConfig", iconName: "antenna.radiowaves.left.and.right", sectionKey: "sidebarTools"),
                 // 其他
                 SidebarNavItem(id: "settings", labelKey: "sidebarSettings", iconName: "gear", sectionKey: "sidebarOther"),
             ]

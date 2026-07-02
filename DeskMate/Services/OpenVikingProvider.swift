@@ -904,13 +904,15 @@ final class StreamCapture: @unchecked Sendable {
     private var data = Data()
     private let lock = NSLock()
 
-    func append(_ chunk: Data) {
+    nonisolated init() {}
+
+    nonisolated func append(_ chunk: Data) {
         lock.lock()
         data.append(chunk)
         lock.unlock()
     }
 
-    func snapshot() -> String {
+    nonisolated func snapshot() -> String {
         lock.lock()
         let copy = data
         lock.unlock()
@@ -923,13 +925,16 @@ final class StreamCapture: @unchecked Sendable {
 final class ResumeOnceFlag: @unchecked Sendable {
     private var done = false
     private let lock = NSLock()
+
+    nonisolated init() {}
+
     /// 当前是否已 resume。
-    var isResumed: Bool {
+    nonisolated var isResumed: Bool {
         lock.lock(); defer { lock.unlock() }
         return done
     }
     /// 尝试标记为已 resume。返回 `true` 表示本次调用获得了"resume 权"。
-    func tryResume() -> Bool {
+    nonisolated func tryResume() -> Bool {
         lock.lock(); defer { lock.unlock() }
         if done { return false }
         done = true
@@ -945,20 +950,20 @@ final class OutputTicker: @unchecked Sendable {
     private var stopped = false
     private let queue = DispatchQueue(label: "ov.runProcess.ticker", qos: .utility)
 
-    init(interval: TimeInterval, callback: @escaping () -> Void) {
+    nonisolated init(interval: TimeInterval, callback: @escaping () -> Void) {
         self.interval = interval
         self.callback = callback
     }
 
-    func start() {
+    nonisolated func start() {
         scheduleNext()
     }
 
-    func stop() {
+    nonisolated func stop() {
         lock.lock(); stopped = true; lock.unlock()
     }
 
-    private func scheduleNext() {
+    nonisolated private func scheduleNext() {
         queue.asyncAfter(deadline: .now() + interval) { [weak self] in
             guard let self else { return }
             self.lock.lock()

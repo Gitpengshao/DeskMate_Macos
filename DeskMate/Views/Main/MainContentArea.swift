@@ -6,6 +6,8 @@ struct MainContentArea: View {
     let viewModel: MainViewModel
     var isDark: Bool
 
+    @ObservedObject private var connection = GatewayConnectionManager.shared
+
     var body: some View {
         VStack(spacing: 0) {
             headerBar
@@ -28,12 +30,11 @@ struct MainContentArea: View {
             HStack(spacing: 8) {
                 PillBadge(
                     icon: Circle()
-                        .fill(Palette.textPrimary)
+                        .fill(gatewayStatusColor)
                         .frame(width: 6, height: 6)
                         .opacity(0.95),
                     label: gatewayStatusLabel
                 )
-                PillBadge(label: "Lv.12 花花")
             }
         }
         .padding(.horizontal, 24)
@@ -47,7 +48,21 @@ struct MainContentArea: View {
         )
     }
 
-    private var gatewayStatusLabel: String { "Gateway 已连接" }
+    private var gatewayStatusLabel: String {
+        switch connection.status {
+        case .checking:     return "Gateway 检测中"
+        case .connected:    return "Gateway 已连接"
+        case .disconnected: return "Gateway 未连接"
+        }
+    }
+
+    private var gatewayStatusColor: Color {
+        switch connection.status {
+        case .checking:     return Palette.textTertiary
+        case .connected:    return Color(red: 0.30, green: 0.85, blue: 0.40)
+        case .disconnected: return Color(red: 0.95, green: 0.30, blue: 0.30)
+        }
+    }
 
     // MARK: - Page Content
 
@@ -62,6 +77,7 @@ struct MainContentArea: View {
             case "task-board":        TaskBoardPage()
             case "model-config":      ModelConfigPage()
             case "skill-management":  SkillManagementPage()
+            case "gateway-config":    GatewayConfigPage()
             case "settings":          placeholderPage(title: "设置", icon: "gearshape")
             default:                  placeholderPage(title: viewModel.itemLabel(activeNavId), icon: "square.grid.2x2")
             }

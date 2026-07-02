@@ -20,6 +20,30 @@ class OnboardingViewModel: ObservableObject {
     private var installStartTime: Date = Date()
     private var cancellables = Set<AnyCancellable>()
 
+    // MARK: - Install Process State（流式安装子进程句柄 + 取消标志 + 单调进度）
+
+    private var installProcess: Process?
+    private let installProcessLock = NSLock()
+    private var isInstallCancelled: Bool = false
+    private let isInstallCancelledLock = NSLock()
+    /// 单调递增的 milestone 进度，仅当关键字命中更高档位时才前进。
+    private var installMilestone: Double = 0.0
+
+    private func setInstallProcess(_ p: Process?) {
+        installProcessLock.lock(); installProcess = p; installProcessLock.unlock()
+    }
+    private func getInstallProcess() -> Process? {
+        installProcessLock.lock(); defer { installProcessLock.unlock() }
+        return installProcess
+    }
+    private func setCancelled(_ v: Bool) {
+        isInstallCancelledLock.lock(); isInstallCancelled = v; isInstallCancelledLock.unlock()
+    }
+    private func getCancelled() -> Bool {
+        isInstallCancelledLock.lock(); defer { isInstallCancelledLock.unlock() }
+        return isInstallCancelled
+    }
+
     // MARK: - Init
 
     init() {
@@ -681,56 +705,56 @@ class OnboardingViewModel: ObservableObject {
         DMLogger.log("[OnboardingVM] startInstallation 开始安装: mirrorUrl=\(mirrorUrl ?? "nil")", name: "OnboardingViewModel")
         installStartTime = Date()
 
+        setCancelled(false)
+        installMilestone = 0.0
+        setInstallProcess(nil)
+
         model.isInstalling = true
         model.isInstallFailed = false
+        model.installError = nil
         model.isDownloadSlow = false
         model.showMirrorPrompt = false
         model.installStartTime = installStartTime
         model.mirrorUrl = mirrorUrl
         model.downloadProgress = 0.0
-        model.downloadSpeed = "-- MB/s"
+        model.downloadSpeed = "准备中"
         model.estimatedTime = "-- s"
         model.installStageLabel = "准备开始..."
         model.currentDownloadingItem = nil
+        model.installLogTail = nil
 
         DMLogger.log("[OnboardingVM] 启动慢速下载检测计时器 (\(Int(kSlowDownloadTimeoutSeconds))秒)", name: "OnboardingViewModel")
         startSlowDownloadDetection()
 
-        // 在后台运行真实安装
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            self?.runInstallation(mirrorUrl: mirrorUrl)
+        // 在后台运行真实安装（官方 install.sh + 流式输出）
+        Task { [weak self] in
+            await self?.runInstallation(mirrorUrl: mirrorUrl)
         }
     }
 
-    /// 真实安装流程（非模拟）。
+    /// 真实安装流程：运行官方 install.sh，流式读取输出驱动进度。
     ///
-    /// 安装阶段：
-    /// 1. 检查前置依赖（Hermes 是否已安装 → 跳过 / 需要安装）
-    /// 2. 配置 Python 环境（检测 python3，如有缺失则安装）
-    /// 3. 下载 Hermes Agent 仓库
-    /// 4. 安装 Python 依赖包
-    /// 5. 完成安装验证
-    private func runInstallation(mirrorUrl: String?) {
+    /// 成功判定：进程退出码 0 且 `checkHermes()` 验证通过；二者任一不满足即 `failInstall`，
+    /// 不置进度为 1.0，不放行 `canAdvance`，错误横幅出现。
+    ///
+    /// 镜像通过进程级 git `insteadOf` 环境变量注入子进程，不写入 `~/.gitconfig`。
+    private func runInstallation(mirrorUrl: String?) async {
         let hermesHome = resolveHermesHome()
 
-        // ---- 阶段 1: 检查前置依赖 ----
-        reportProgress(0.05, stage: "正在检查前置依赖...", item: "检测 Python3 和 Hermes 是否已安装")
-        DMLogger.log("[OnboardingVM] 阶段1: 检查前置依赖", name: "OnboardingViewModel")
+        // ---- 阶段 0: 已安装则跳过 ----
+        reportMilestone(0.05, stage: "正在检查前置依赖...", item: "检测 Hermes 是否已安装")
+        DMLogger.log("[OnboardingVM] 阶段0: 检查 Hermes 是否已安装", name: "OnboardingViewModel")
 
-        let pythonAvailable = checkPython(hermesHome: hermesHome).available
-        let hermesAlreadyInstalled = checkHermes(hermesHome: hermesHome).installed
-
-        // 如果 Hermes 已安装且 Python 可用，跳过安装
-        if hermesAlreadyInstalled && pythonAvailable {
-            DMLogger.log("[OnboardingVM] Hermes 和 Python 均已安装，跳过安装流程", name: "OnboardingViewModel")
-
-            DispatchQueue.main.async { [weak self] in
+        if checkHermes(hermesHome: hermesHome).installed {
+            DMLogger.log("[OnboardingVM] Hermes 已安装，跳过安装流程", name: "OnboardingViewModel")
+            await MainActor.run { [weak self] in
                 guard let self = self else { return }
                 self.slowDownloadTimer?.invalidate()
+                self.installMilestone = 1.0
                 self.model.downloadProgress = 1.0
                 self.model.isInstalling = false
                 self.model.installStageLabel = "已安装（无需重复安装）"
-                self.model.downloadSpeed = "-- MB/s"
+                self.model.downloadSpeed = "就绪"
                 self.model.estimatedTime = "-- s"
                 self.model.hermesInstalled = true
                 self.model.isDownloadSlow = false
@@ -740,201 +764,302 @@ class OnboardingViewModel: ObservableObject {
             return
         }
 
-        DMLogger.log("[OnboardingVM] Python可用=\(pythonAvailable), Hermes已安装=\(hermesAlreadyInstalled)", name: "OnboardingViewModel")
+        // ---- 阶段 1: 官方脚本要求 git 可用 ----
+        let gitOut = runShell("git --version 2>/dev/null")
+        let gitOk = !gitOut.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        DMLogger.log("[OnboardingVM] 阶段1: git 检测 gitOk=\(gitOk)", name: "OnboardingViewModel")
+        guard gitOk else {
+            failInstall("未检测到 git。请先在终端运行 `xcode-select --install` 安装 Xcode Command Line Tools 后重试。")
+            return
+        }
+        reportMilestone(0.10, stage: "准备官方安装脚本", item: "git 已就绪 ✓")
 
-        // ---- 阶段 2: 配置 Python 环境 ----
-        reportProgress(0.15, stage: "正在配置 Python 环境", item: "检测 Python3 路径")
-        DMLogger.log("[OnboardingVM] 阶段2: 配置 Python 环境", name: "OnboardingViewModel")
+        // ---- 阶段 1.5: 预置 managed uv 符号链接 ----
+        // install.sh 的 install_uv() 总是把 uv 装到 ~/.hermes/bin/uv。
+        // astral.sh 的 uv 安装器在系统已有 uv 时 exit 0 但不放置二进制，
+        // 导致 "uv installer reported success but binary not found"。
+        // 解决：系统已有 uv 时预先创建符号链接，让 install_uv() 直接复用。
+        precreateManagedUvSymlink(hermesHome: hermesHome)
 
-        if !pythonAvailable {
-            reportProgress(0.20, stage: "正在配置 Python 环境", item: "尝试安装 Python3...")
-            DMLogger.log("[OnboardingVM] Python3 未安装，尝试安装...", name: "OnboardingViewModel")
+        // ---- 阶段 2: 构造镜像环境（进程级 git insteadOf，非全局 config）----
+        var env = ProcessInfo.processInfo.environment
 
-            // 首次尝试使用 Homebrew
-            let brewResult = runShell("which brew 2>/dev/null")
-            if !brewResult.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                reportProgress(0.25, stage: "正在配置 Python 环境", item: "使用 Homebrew 安装 Python3")
-                DMLogger.log("[OnboardingVM] 通过 Homebrew 安装 Python3", name: "OnboardingViewModel")
-                _ = runShell("brew install python@3 2>/dev/null &")
-                // Homebrew 安装较慢，等待一段时间
-                Thread.sleep(forTimeInterval: 3.0)
-                reportProgress(0.35, stage: "正在配置 Python 环境", item: "Python3 安装完成，验证中...")
-            } else {
-                // 无 Homebrew，尝试使用 Xcode Command Line Tools 自带的 python3
-                DMLogger.log("[OnboardingVM] 未检测到 Homebrew，尝试使用系统 Python3", name: "OnboardingViewModel")
-                _ = runShell("xcode-select --install 2>/dev/null &")
-                Thread.sleep(forTimeInterval: 2.0)
-                reportProgress(0.30, stage: "正在配置 Python 环境", item: "等待 Python3 就绪...")
+        // 扩展 PATH：macOS app 从 Finder 启动时 PATH 只有 /usr/bin:/bin，
+        // 缺少 ~/.local/bin、/opt/homebrew/bin 等，导致 install.sh 找不到 node/uv/python3。
+        let userHome = NSHomeDirectory()
+        var expandedPath = env["PATH"] ?? "/usr/bin:/bin"
+        for entry in ["\(userHome)/.local/bin", "/opt/homebrew/bin", "/usr/local/bin"].reversed() {
+            if !expandedPath.contains(entry) {
+                expandedPath = "\(entry):\(expandedPath)"
             }
+        }
+        // nvm 管理的 node 路径（版本号不固定，取最新）
+        let nvmNodeBin = runShell("ls -d \(userHome)/.nvm/versions/node/*/bin 2>/dev/null | tail -1")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !nvmNodeBin.isEmpty && !expandedPath.contains(nvmNodeBin) {
+            expandedPath = "\(nvmNodeBin):\(expandedPath)"
+        }
+        env["PATH"] = expandedPath
+        DMLogger.log("[OnboardingVM] 扩展后 PATH=\(expandedPath)", name: "OnboardingViewModel")
 
-            // 再次验证 Python
-            let pythonRecheck = checkPython(hermesHome: hermesHome).available
-            if !pythonRecheck {
-                DMLogger.log("[OnboardingVM] Python3 安装失败，将继续安装流程", name: "OnboardingViewModel")
-                reportProgress(0.35, stage: "正在配置 Python 环境", item: "Python3 未就绪，跳过此步骤")
-            }
-        } else {
-            DMLogger.log("[OnboardingVM] Python3 已安装，跳过", name: "OnboardingViewModel")
-            reportProgress(0.35, stage: "正在配置 Python 环境", item: "Python3 已就绪 ✓")
+        if let mirror = mirrorUrl, !mirror.isEmpty {
+            // git ≥2.31 支持 GIT_CONFIG_COUNT / GIT_CONFIG_KEY_n / GIT_CONFIG_VALUE_n
+            // 把 https://github.com/... 重写为 <mirror>/https://github.com/...
+            env["GIT_CONFIG_COUNT"] = "1"
+            env["GIT_CONFIG_KEY_0"] = "url.\(mirror)/https://github.com/.insteadOf"
+            env["GIT_CONFIG_VALUE_0"] = "https://github.com/"
+            DMLogger.log("[OnboardingVM] 已注入进程级 git insteadOf 镜像: \(mirror)", name: "OnboardingViewModel")
         }
 
-        // ---- 阶段 3: 下载 Hermes Agent ----
-        reportProgress(0.40, stage: "正在下载 Hermes Agent", item: "创建 HERMES_HOME 目录")
-        DMLogger.log("[OnboardingVM] 阶段3: 下载 Hermes Agent, hermesHome=\(hermesHome)", name: "OnboardingViewModel")
+        // ---- 阶段 3: 流式运行官方安装脚本 ----
+        // 不加 `< /dev/null`：那会覆盖 `curl | bash` 的管道输入，导致 bash 读到空脚本。
+        // 脚本自身用 `[ -t 0 ]` 检测非交互模式——管道 stdin 非 tty → IS_INTERACTIVE=false。
+        // --skip-setup 跳过交互式 setup 向导（模型配置由第 3 步 onboarding 负责）；
+        // --non-interactive 跳过需要用户输入的阶段（如 sudo 提示）。
+        reportMilestone(0.15, stage: "正在运行官方安装脚本", item: "拉取并执行 install.sh")
+        let argv = "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-setup --non-interactive"
+        DMLogger.log("[OnboardingVM] 阶段3: 运行官方安装脚本", name: "OnboardingViewModel")
 
-        // 确保 HERMES_HOME 目录存在
         do {
-            try FileManager.default.createDirectory(
-                atPath: hermesHome,
-                withIntermediateDirectories: true,
-                attributes: nil
+            let result = try await StreamingProcessRunner.run(
+                executable: "/bin/bash",
+                args: ["-c", argv],
+                environment: env,
+                timeout: 30 * 60,   // 安装较重，给 30 分钟
+                logName: "OnboardingViewModel",
+                onOutput: { [weak self] tail in
+                    self?.handleInstallOutput(tail)
+                },
+                onProcessReady: { [weak self] proc in
+                    self?.setInstallProcess(proc)
+                }
             )
-            DMLogger.log("[OnboardingVM] 已创建 HERMES_HOME 目录: \(hermesHome)", name: "OnboardingViewModel")
+            setInstallProcess(nil)
+            finishInstall(result: result, hermesHome: hermesHome)
         } catch {
-            DMLogger.error("[OnboardingVM] 创建 HERMES_HOME 目录失败: \(error)", name: "OnboardingViewModel")
-        }
-
-        reportProgress(0.50, stage: "正在下载 Hermes Agent", item: "cloning hermes-agent 仓库 (约 25MB)")
-
-        // 尝试从 GitHub 下载 hermes-agent（优先使用镜像）
-        let hermesAgentDir = "\(hermesHome)/hermes-agent"
-        let fm = FileManager.default
-
-        if fm.fileExists(atPath: "\(hermesAgentDir)/.git") {
-            DMLogger.log("[OnboardingVM] hermes-agent 仓库已存在，执行 git pull 更新", name: "OnboardingViewModel")
-            _ = runShell("cd '\(hermesAgentDir)' && git pull --ff-only 2>/dev/null")
-        } else {
-            // 移除可能的不完整目录
-            if fm.fileExists(atPath: hermesAgentDir) {
-                try? fm.removeItem(atPath: hermesAgentDir)
+            setInstallProcess(nil)
+            DMLogger.error("[OnboardingVM] 启动安装脚本失败: \(error)", name: "OnboardingViewModel")
+            if !getCancelled() {
+                failInstall("启动安装脚本失败：\(error.localizedDescription)")
             }
-
-            let repoUrl: String
-            if let mirror = mirrorUrl, !mirror.isEmpty {
-                repoUrl = "\(mirror)/https://github.com/hermes/hermes-agent.git"
-                DMLogger.log("[OnboardingVM] 使用镜像克隆: \(repoUrl)", name: "OnboardingViewModel")
-            } else {
-                repoUrl = "https://github.com/hermes/hermes-agent.git"
-                DMLogger.log("[OnboardingVM] 直接克隆: \(repoUrl)", name: "OnboardingViewModel")
-            }
-
-            reportProgress(0.55, stage: "正在下载 Hermes Agent", item: "git clone hermes-agent 仓库...")
-            let cloneResult = runShell("git clone --depth 1 '\(repoUrl)' '\(hermesAgentDir)' 2>&1")
-            DMLogger.log("[OnboardingVM] git clone 结果: \(cloneResult.prefix(200))", name: "OnboardingViewModel")
-        }
-
-        reportProgress(0.70, stage: "正在下载 Hermes Agent", item: "仓库已就绪")
-
-        // ---- 阶段 4: 安装 Python 依赖包 ----
-        reportProgress(0.75, stage: "正在安装 Python 依赖包", item: "创建虚拟环境 (venv)")
-        DMLogger.log("[OnboardingVM] 阶段4: 安装 Python 依赖", name: "OnboardingViewModel")
-
-        let venvPath = "\(hermesHome)/venv"
-        if !fm.fileExists(atPath: "\(venvPath)/bin/python3") {
-            _ = runShell("python3 -m venv '\(venvPath)' 2>/dev/null")
-            DMLogger.log("[OnboardingVM] 已创建虚拟环境: \(venvPath)", name: "OnboardingViewModel")
-        } else {
-            DMLogger.log("[OnboardingVM] 虚拟环境已存在，跳过创建", name: "OnboardingViewModel")
-        }
-
-        reportProgress(0.85, stage: "正在安装 Python 依赖包", item: "pip install 依赖...")
-
-        // 检查 requirements.txt
-        let requirementsPath = "\(hermesAgentDir)/requirements.txt"
-        if fm.fileExists(atPath: requirementsPath) {
-            DMLogger.log("[OnboardingVM] 找到 requirements.txt，开始安装依赖", name: "OnboardingViewModel")
-            _ = runShell("'\(venvPath)/bin/pip' install -r '\(requirementsPath)' --quiet 2>/dev/null")
-        } else {
-            DMLogger.log("[OnboardingVM] 未找到 requirements.txt，跳过 pip install", name: "OnboardingViewModel")
-        }
-
-        reportProgress(0.95, stage: "正在安装 Python 依赖包", item: "依赖安装完成 ✓")
-
-        // ---- 阶段 5: 完成安装验证 ----
-        reportProgress(1.0, stage: "正在完成安装验证", item: "验证安装结果...")
-        DMLogger.log("[OnboardingVM] 阶段5: 完成安装验证", name: "OnboardingViewModel")
-
-        // 写入基本的 .env 配置文件
-        let envPath = "\(hermesHome)/.env"
-        if mirrorUrl != nil && !mirrorUrl!.isEmpty {
-            let envContent = "GITHUB_MIRROR=\(mirrorUrl!)\n"
-            try? envContent.write(toFile: envPath, atomically: true, encoding: .utf8)
-            DMLogger.log("[OnboardingVM] 已写入 GITHUB_MIRROR 到 .env: \(mirrorUrl!)", name: "OnboardingViewModel")
-        }
-
-        // 安装完成，回到主线程更新状态
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            self.slowDownloadTimer?.invalidate()
-
-            self.model.downloadProgress = 1.0
-            self.model.isInstalling = false
-            self.model.installStageLabel = "安装完成 ✓"
-            self.model.downloadSpeed = "-- MB/s"
-            self.model.estimatedTime = "-- s"
-            self.model.hermesInstalled = true
-            self.model.isDownloadSlow = false
-            self.model.showMirrorPrompt = false
-            self.model.currentDownloadingItem = nil
-
-            DMLogger.log("[OnboardingVM] 安装成功!", name: "OnboardingViewModel")
-
-            // 重新检测环境以更新状态
-            DMLogger.log("[OnboardingVM] 重新检测环境状态...", name: "OnboardingViewModel")
-            self.startEnvironmentCheck()
         }
     }
 
-    /// 报告安装进度并更新 UI 状态。
-    private func reportProgress(_ progress: Double, stage: String, item: String) {
-        let now = Date()
-        let elapsed = now.timeIntervalSince(installStartTime)
+    /// 预置 ~/.hermes/bin/uv 符号链接，绕过 astral.sh 安装器在系统已有 uv 时的 bug
+    /// （安装器 exit 0 但不放置二进制，导致 install.sh 报 "binary not found" 退出）。
+    private func precreateManagedUvSymlink(hermesHome: String) {
+        let managedUvPath = "\(hermesHome)/bin/uv"
+        let fm = FileManager.default
 
-        let speedStr: String = item
-        let etaStr: String
-        if elapsed > 0 && progress > 0.01 {
-            let remainingProgress = 1.0 - progress
-            let speedPerSec = progress / elapsed
-            let remainingSeconds = speedPerSec > 0
-                ? Int(remainingProgress / speedPerSec)
-                : 999
-
-            if remainingSeconds < 60 {
-                etaStr = "\(remainingSeconds) 秒"
-            } else if remainingSeconds < 3600 {
-                etaStr = "\(remainingSeconds / 60) 分 \(remainingSeconds % 60) 秒"
-            } else {
-                etaStr = "> 1 小时"
-            }
-        } else {
-            etaStr = "计算中..."
+        if fm.isExecutableFile(atPath: managedUvPath) {
+            DMLogger.log("[OnboardingVM] managed uv 已存在: \(managedUvPath)", name: "OnboardingViewModel")
+            return
         }
 
-        DMLogger.log("[OnboardingVM] 安装进度: progress=\(String(format: "%.3f", progress)), stage=\(stage), item=\(item)", name: "OnboardingViewModel")
-        DMLogger.log("[OnboardingVM] 速度/ETA: elapsed=\(String(format: "%.0f", elapsed))s, etaStr=\(etaStr)", name: "OnboardingViewModel")
+        let userHome = NSHomeDirectory()
+        let candidates = [
+            "\(userHome)/.local/bin/uv",
+            "/opt/homebrew/bin/uv",
+            "/usr/local/bin/uv"
+        ]
+        guard let systemUv = candidates.first(where: { fm.isExecutableFile(atPath: $0) }) else {
+            DMLogger.log("[OnboardingVM] 系统未安装 uv，install.sh 将自行下载安装", name: "OnboardingViewModel")
+            return
+        }
 
-        // 进度超过阈值后取消慢速检测
-        if progress > kSlowDownloadProgressThreshold {
-            DispatchQueue.main.async { [weak self] in
-                self?.slowDownloadTimer?.invalidate()
-                if self?.model.isDownloadSlow == true {
-                    self?.model.isDownloadSlow = false
-                    DMLogger.log("[OnboardingVM] 下载已加速，隐藏慢速提示", name: "OnboardingViewModel")
+        let binDir = "\(hermesHome)/bin"
+        do {
+            try fm.createDirectory(atPath: binDir, withIntermediateDirectories: true)
+        } catch {
+            DMLogger.error("[OnboardingVM] 创建 \(binDir) 失败: \(error)", name: "OnboardingViewModel")
+            return
+        }
+        try? fm.removeItem(atPath: managedUvPath)
+        do {
+            try fm.createSymbolicLink(atPath: managedUvPath, withDestinationPath: systemUv)
+            DMLogger.log("[OnboardingVM] 已预置 uv 符号链接: \(managedUvPath) -> \(systemUv)", name: "OnboardingViewModel")
+        } catch {
+            DMLogger.error("[OnboardingVM] 创建 uv 符号链接失败: \(error)", name: "OnboardingViewModel")
+        }
+    }
+
+    /// 处理流式输出的尾部日志：剥离 ANSI、匹配关键字驱动单调进度、更新 UI 实时文本。
+    /// 在 `OutputTicker` 后台队列触发；所有 `@Published` 写入走主线程。
+    private func handleInstallOutput(_ tail: String) {
+        let cleaned = StreamingProcessRunner.stripANSI(tail)
+        let lines = cleaned.split(whereSeparator: { $0 == "\n" || $0 == "\r" })
+            .map(String.init)
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        guard !lines.isEmpty else { return }
+
+        let lastLine = lines.last ?? ""
+        let logTail = StreamingProcessRunner.lastNonEmptyLines(in: cleaned, max: 8)
+
+        // 计算本批输出命中的最高 milestone（单调递增）
+        var candidate: Double = 0.0
+        for line in lines {
+            let hit = milestoneForLine(line)
+            if hit > candidate { candidate = hit }
+        }
+
+        let elapsed = Int(Date().timeIntervalSince(installStartTime))
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.model.currentDownloadingItem = lastLine
+            self.model.installLogTail = logTail
+            self.model.downloadSpeed = "实时安装中"
+            self.model.estimatedTime = "已用 \(elapsed)s"
+            if candidate > self.installMilestone {
+                self.installMilestone = candidate
+                self.model.downloadProgress = candidate
+                self.model.installStageLabel = Self.milestoneStageLabel(candidate)
+                DMLogger.log("[OnboardingVM] 进度推进到 \(candidate), item=\(lastLine)", name: "OnboardingViewModel")
+                // 进度越过阈值后取消慢速检测
+                if candidate > kSlowDownloadProgressThreshold {
+                    self.slowDownloadTimer?.invalidate()
+                    if self.model.isDownloadSlow {
+                        self.model.isDownloadSlow = false
+                        DMLogger.log("[OnboardingVM] 下载已加速，隐藏慢速提示", name: "OnboardingViewModel")
+                    }
                 }
             }
         }
+    }
+
+    /// 根据输出行关键字返回对应的 milestone（0 表示不匹配）。
+    /// 大小写不敏感；进度单调递增由调用方保证。
+    private func milestoneForLine(_ raw: String) -> Double {
+        let line = raw.lowercased()
+        // 0.95 必须先于 0.70 判定，避免 "installation complete" 被 "installing" 档截获
+        if (line.contains("complete") && (line.contains("install") || line.contains("hermes")))
+            || line.contains("symlink") || line.contains("added to path")
+            || line.contains("✓ hermes") || line.contains("✓ install") {
+            return 0.95
+        }
+        if line.contains("node") || line.contains("playwright") || line.contains("browser")
+            || line.contains("ripgrep") || line.contains("ffmpeg") || line.contains("npm") {
+            return 0.85
+        }
+        if line.contains("pip") || line.contains("installing") || line.contains("dependencies") {
+            return 0.70
+        }
+        if line.contains("venv") || line.contains("virtual environment")
+            || line.contains("uv") || line.contains("python 3.11") || line.contains("python3.11") {
+            return 0.40
+        }
+        if line.contains("cloning") || line.contains("git clone")
+            || line.contains("download hermes") || line.contains("repository") {
+            return 0.15
+        }
+        return 0.0
+    }
+
+    /// 安装脚本结束后的成败判定。
+    private func finishInstall(result: StreamingProcessRunner.Result, hermesHome: String) {
+        // 用户已取消：静默重置，不报失败
+        if getCancelled() {
+            DMLogger.log("[OnboardingVM] 安装已被用户取消，静默重置", name: "OnboardingViewModel")
+            DispatchQueue.main.async { [weak self] in self?.resetInstallState() }
+            return
+        }
+
+        DMLogger.log("[OnboardingVM] 安装脚本结束 exitCode=\(result.exitCode), stdout=\(result.stdout.count)B, stderr=\(result.stderr.count)B", name: "OnboardingViewModel")
+
+        if result.exitCode == 0 {
+            // 退出码 0 还需二次验证 hermes 可执行文件确实生成
+            let installed = checkHermes(hermesHome: hermesHome).installed
+            if installed {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    self.slowDownloadTimer?.invalidate()
+                    self.installMilestone = 1.0
+                    self.model.downloadProgress = 1.0
+                    self.model.isInstalling = false
+                    self.model.installStageLabel = "安装完成 ✓"
+                    self.model.downloadSpeed = "就绪"
+                    self.model.estimatedTime = "-- s"
+                    self.model.hermesInstalled = true
+                    self.model.isDownloadSlow = false
+                    self.model.showMirrorPrompt = false
+                    self.model.currentDownloadingItem = nil
+                    DMLogger.log("[OnboardingVM] 安装成功!", name: "OnboardingViewModel")
+                    // 重新检测环境以刷新状态
+                    self.startEnvironmentCheck()
+                }
+                return
+            }
+            failInstall("安装脚本退出码为 0，但未检测到 hermes 可执行文件。\n\(Self.tailOf(result))")
+        } else {
+            failInstall("安装失败（退出码 \(result.exitCode)）。\n\(Self.tailOf(result))")
+        }
+    }
+
+    /// 标记安装失败：置 `isInstallFailed`、显示错误横幅、**不置进度为 1.0**（保留当前 milestone < 1.0 → canAdvance=false）。
+    private func failInstall(_ message: String) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.slowDownloadTimer?.invalidate()
+            self.model.isInstalling = false
+            self.model.isInstallFailed = true
+            self.model.installError = message
+            self.model.installStageLabel = "安装失败"
+            self.model.downloadSpeed = "安装失败"
+            DMLogger.error("[OnboardingVM] 安装失败: \(message)", name: "OnboardingViewModel")
+        }
+    }
+
+    /// 重置安装中间状态（取消后使用）。
+    private func resetInstallState() {
+        slowDownloadTimer?.invalidate()
+        model.isInstalling = false
+        model.downloadProgress = 0.0
+        model.isDownloadSlow = false
+        model.showMirrorPrompt = false
+        model.currentDownloadingItem = nil
+        model.installLogTail = nil
+        installMilestone = 0.0
+    }
+
+    /// 取结果末尾若干非空行作为错误上下文（已剥离 ANSI）。
+    private static func tailOf(_ result: StreamingProcessRunner.Result) -> String {
+        let combined = StreamingProcessRunner.stripANSI(result.stdout + "\n" + result.stderr)
+        return StreamingProcessRunner.lastNonEmptyLines(in: combined, max: 10)
+    }
+
+    /// milestone 档位 → 中文阶段名。
+    private static func milestoneStageLabel(_ m: Double) -> String {
+        switch m {
+        case 0.95...: return "正在完成安装验证"
+        case 0.85..<0.95: return "正在安装 Node/浏览器工具依赖"
+        case 0.70..<0.85: return "正在安装 Python 依赖"
+        case 0.40..<0.70: return "正在配置 Python 环境"
+        case 0.15..<0.40: return "正在下载 Hermes Agent 仓库"
+        default: return "正在运行官方安装脚本"
+        }
+    }
+
+    /// 报告一个显式 milestone（来自 runInstallation 的阶段标记），单调递增，无 sleep、无假 ETA。
+    private func reportMilestone(_ progress: Double, stage: String, item: String) {
+        let elapsed = Int(Date().timeIntervalSince(installStartTime))
+        DMLogger.log("[OnboardingVM] milestone=\(progress), stage=\(stage), item=\(item)", name: "OnboardingViewModel")
 
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-            self.model.downloadProgress = progress
+            if progress > self.installMilestone {
+                self.installMilestone = progress
+                self.model.downloadProgress = progress
+            }
             self.model.installStageLabel = stage
-            self.model.downloadSpeed = speedStr
-            self.model.estimatedTime = etaStr
+            self.model.downloadSpeed = "实时安装中"
+            self.model.estimatedTime = "已用 \(elapsed)s"
             self.model.currentDownloadingItem = item
+            if progress > kSlowDownloadProgressThreshold {
+                self.slowDownloadTimer?.invalidate()
+                if self.model.isDownloadSlow {
+                    self.model.isDownloadSlow = false
+                }
+            }
         }
-
-        // 给予 UI 更新和实际命令执行的时间
-        Thread.sleep(forTimeInterval: 0.3)
     }
 
     /// 启动慢速下载检测计时器（对齐 Flutter 的 _startSlowDownloadDetection）。
@@ -985,27 +1110,41 @@ class OnboardingViewModel: ObservableObject {
         model.showMirrorPrompt = false
     }
 
-    /// 取消正在进行的下载/安装。
+    /// 取消正在进行的下载/安装：真正终止 install.sh 子进程，并给出可重试状态。
     func cancelDownload() {
         DMLogger.log("[OnboardingVM] cancelDownload: 用户取消了下载", name: "OnboardingViewModel")
+        setCancelled(true)
+        getInstallProcess()?.terminate()
+        setInstallProcess(nil)
         downloadTimer?.invalidate()
         slowDownloadTimer?.invalidate()
-        model.downloadProgress = 0.0
+        installMilestone = 0.0
         model.isInstalling = false
+        model.downloadProgress = 0.0
         model.isDownloadSlow = false
         model.showMirrorPrompt = false
         model.currentDownloadingItem = nil
+        model.installLogTail = nil
+        // 视为可重试状态，复用错误横幅的"重试"按钮，避免取消后卡死无路可走
+        model.isInstallFailed = true
+        model.installError = "安装已取消，可点击重试重新开始。"
+        model.installStageLabel = "已取消"
+        model.downloadSpeed = "已取消"
     }
 
     /// 安装失败后重试。
     func retryInstallation() {
         DMLogger.log("[OnboardingVM] retryInstallation: 用户重试安装, mirrorUrl=\(model.mirrorUrl ?? "nil")", name: "OnboardingViewModel")
+        setCancelled(false)
+        installMilestone = 0.0
+        setInstallProcess(nil)
         model.isInstallFailed = false
         model.installError = nil
         model.downloadProgress = 0.0
         model.isDownloadSlow = false
         model.showMirrorPrompt = false
         model.currentDownloadingItem = nil
+        model.installLogTail = nil
         startInstallation(mirrorUrl: model.mirrorUrl)
     }
 

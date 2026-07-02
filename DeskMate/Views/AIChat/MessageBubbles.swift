@@ -12,14 +12,26 @@ struct PetMessageBubble: View {
     let toolProgressEvents: [ToolProgressEvent]
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            avatar
-            VStack(alignment: .leading, spacing: 4) {
-                bubble
-                if !isStreaming {
-                    Text(message.timestamp)
-                        .font(.system(size: 10))
-                        .foregroundColor(Palette.textTertiary)
+        if isStreaming && message.text.isEmpty {
+            // 等待阶段：整 item 用 think 精灵图帧动画，无头像 / 文字。
+            HStack {
+                SpriteFrameAnimationView(
+                    config: PetAnimation.think.config,
+                    fps: 18,
+                    displaySize: 90
+                )
+                Spacer()
+            }
+        } else {
+            HStack(alignment: .top, spacing: 10) {
+                avatar
+                VStack(alignment: .leading, spacing: 4) {
+                    bubble
+                    if !isStreaming {
+                        Text(message.timestamp)
+                            .font(.system(size: 10))
+                            .foregroundColor(Palette.textTertiary)
+                    }
                 }
             }
         }
@@ -87,18 +99,6 @@ struct PetMessageBubble: View {
                 Text(toolCall)
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(Palette.textTertiary)
-            }
-
-            if isStreaming {
-                HStack(spacing: 6) {
-                    Text("生成中")
-                        .font(.system(size: 10))
-                        .foregroundColor(Palette.textTertiary)
-                    ProgressView()
-                        .scaleEffect(0.5)
-                        .frame(width: 10, height: 10)
-                        .tint(Palette.textPrimary)
-                }
             }
         }
         .padding(.horizontal, 14)

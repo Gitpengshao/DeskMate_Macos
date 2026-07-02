@@ -97,6 +97,7 @@ struct OnboardingView: View {
                     showMirrorPrompt: viewModel.model.showMirrorPrompt,
                     isConfiguringMirror: viewModel.model.isConfiguringMirror,
                     mirrorUrl: viewModel.model.mirrorUrl,
+                    installLogTail: viewModel.model.installLogTail,
                     onCancel: { viewModel.cancelDownload() },
                     onConfigureMirror: { viewModel.configureMirrorAndRestart() },
                     onDismissMirror: { viewModel.dismissMirrorPrompt() }
@@ -154,7 +155,7 @@ struct OnboardingView: View {
                 viewModel.nextStep()
                 viewModel.startInstallation()
             }
-        } else if state.currentStep == 1 && state.downloadProgress >= 1.0 {
+        } else if state.currentStep == 1 && state.downloadProgress >= 1.0 && !state.isInstallFailed {
             // 安装步骤完成，前进到欢迎引导
             viewModel.nextStep()
         }

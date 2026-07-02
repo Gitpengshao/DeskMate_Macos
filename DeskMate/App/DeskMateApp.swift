@@ -6,7 +6,6 @@ struct DeskMateApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     /// 从启动参数 `--show-webview <URL>` 中提取 WebView 模式的目标 URL。
-    /// 提取逻辑与 AppDelegate 保持一致 — AppDelegate 负责真正的窗口生命周期。
     private static let launchWebViewURL: String? = {
         let args = CommandLine.arguments
         guard let idx = args.firstIndex(of: "--show-webview"),
@@ -16,12 +15,15 @@ struct DeskMateApp: App {
     }()
 
     var body: some Scene {
-        // 单一 WindowGroup：宠物窗口 + 主控制台由 AppDelegate 单独管理。
-        // WebView 模式启动时仅展示 WebView 窗口，并跳过宠物/状态栏/Gateway。
+        // WindowGroup 仅作为占位 — 宠物窗口由 PetWindowController 独立管理，
+        // 主控制台/Onboarding 由 AppDelegate 以独立 NSWindow 管理。
+        // WebView 模式启动时展示 WebView 窗口。
         WindowGroup {
             if Self.launchWebViewURL == nil {
-                ContentView()
-                    .environmentObject(appDelegate.viewModel)
+                // 正常模式：极小的隐藏窗口，宠物和主控制台由 AppDelegate 管理
+                Color.clear
+                    .frame(width: 1, height: 1)
+                    .allowsHitTesting(false)
             } else {
                 MMWebViewWindow(urlString: Self.launchWebViewURL ?? "") {
                     NSApp.terminate(nil)
@@ -32,17 +34,19 @@ struct DeskMateApp: App {
     }
 }
 
+// MARK: - AppDelegate
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let viewModel = PetViewModel()
     let onboardingVM = OnboardingViewModel()
-    private let statusBarManager = StatusBarManager()
+
+    private var petWindowController: PetWindowController?
+    private let notchManager = DynamicNotchManager.shared
     private var onboardingWindow: NSWindow?
     private var mainWindow: NSWindow?
-    /// 标记 Gateway 是否已启动（与 Flutter app.dart 中 startGateway 调用对齐）。
     private var gatewayStarted: Bool = false
 
-    /// WebView 模式的目标 URL — 通过启动参数 `--show-webview <URL>` 注入。
-    /// 非 nil 时整个进程退化为"单窗口 WebView 浏览器"，不初始化宠物/状态栏/Gateway。
+    /// WebView 模式的目标 URL
     let webViewURL: String? = {
         let args = CommandLine.arguments
         guard let idx = args.firstIndex(of: "--show-webview"),
@@ -51,87 +55,93 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return value.isEmpty ? nil : value
     }()
 
-    /// 是否运行在 WebView 模式（独立进程仅展示 Provider 页面）。
     var isWebViewMode: Bool { webViewURL != nil }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSLog("[AppDelegate] applicationDidFinishLaunching: 应用启动 (webViewMode=\(isWebViewMode))")
-        // WebView 模式：不初始化宠物窗口、状态栏、Gateway — 只让 SwiftUI 场景里
-        // 的 WindowGroup 展示 WebView 窗口，关闭后由 applicationShouldTerminateAfterLastWindowClosed 退出。
-        if isWebViewMode { return }
-        DispatchQueue.main.async {
-            // 1. 配置宠物窗口（始终存在、透明、悬浮）
-            self.configurePetWindow()
+        NSLog("[AppDelegate] applicationDidFinishLaunching: 启动 (webViewMode=\(isWebViewMode))")
 
-            // 2. 设置状态栏托盘
-            self.statusBarManager.setup()
-            self.statusBarManager.onOpenConsole = { [weak self] in
+        if isWebViewMode { return }
+
+        // 隐藏 Dock 图标，仅通过灵动岛和桌宠交互
+        NSApplication.shared.setActivationPolicy(.accessory)
+
+        DispatchQueue.main.async {
+            // 1. 隐藏 WindowGroup 的占位窗口
+            self.hidePlaceholderWindow()
+
+            // 2. 创建独立的桌宠悬浮窗口
+            self.setupPetWindow()
+
+            // 3. 设置灵动岛回调
+            self.notchManager.onOpenConsole = { [weak self] in
                 self?.openConsole()
             }
 
-            // 3. 如果 onboarding 已完成，提前启动 Hermes Gateway
-            //    对齐 Flutter app.dart 中 startGateway 调用
+            // 4. 启动时显示灵动岛
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                self?.notchManager.show()
+            }
+
+            // 5. 如果 onboarding 已完成，提前启动 Hermes Gateway
             let onboardingCompleted = UserDefaults.standard.bool(forKey: "onboarding_completed")
             NSLog("[AppDelegate] onboarding_completed = \(onboardingCompleted)")
             if onboardingCompleted {
                 self.startHermesGatewayIfNeeded()
+                // 6. 静默预加载主控制台窗口，避免点击灵动岛后卡顿
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                    self?.preloadMainWindow()
+                }
             }
         }
     }
 
-    // MARK: - 宠物窗口（独立进程、透明悬浮）
+    // MARK: - 隐藏占位窗口
 
-    private func configurePetWindow() {
-        guard let window = NSApplication.shared.windows.first else { return }
-
-        let petSize = viewModel.petSize
-
-        window.isOpaque = false
-        window.backgroundColor = .clear
-        window.level = .floating
-        window.hasShadow = false
-        window.collectionBehavior = [.canJoinAllSpaces, .stationary]
-        window.styleMask = [.borderless]
-        window.ignoresMouseEvents = false
-        window.isMovableByWindowBackground = true
-
-        window.contentView?.wantsLayer = true
-        window.contentView?.layer?.isOpaque = false
-
-        if let screen = NSScreen.main {
-            let screenFrame = screen.visibleFrame
-            let x = screenFrame.midX - petSize.width / 2
-            let y = screenFrame.midY - petSize.height / 2
-            window.setFrame(
-                NSRect(x: x, y: y, width: petSize.width, height: petSize.height),
-                display: true
-            )
+    private func hidePlaceholderWindow() {
+        // 隐藏 WindowGroup 创建的所有窗口
+        for window in NSApplication.shared.windows {
+            window.orderOut(nil)
+            window.isOpaque = false
+            window.backgroundColor = .clear
+            window.ignoresMouseEvents = true
+            window.level = .init(Int(CGWindowLevelForKey(.desktopWindow)) - 1)
         }
-
-        viewModel.configure(with: window)
     }
 
-    // MARK: - 控制台/Onboarding 窗口（独立窗口）
+    // MARK: - 宠物窗口（独立 NSPanel）
+
+    private func setupPetWindow() {
+        let controller = PetWindowController(viewModel: viewModel)
+        controller.onDoubleClick = { [weak self] in
+            self?.notchManager.show()
+        }
+        controller.show()
+        petWindowController = controller
+    }
+
+    // MARK: - 控制台 / Onboarding 窗口
 
     private func openConsole() {
+        // 打开控制台时恢复 Dock 图标，方便 Cmd+Tab 切换
+        NSApplication.shared.setActivationPolicy(.regular)
+
         let onboardingCompleted = UserDefaults.standard.bool(forKey: "onboarding_completed")
         if onboardingCompleted {
-            // Onboarding 已完成 → 打开主控制台窗口
             openMainConsole()
             return
         }
 
-        // 如果 onboarding 窗口已存在，直接提到前面
+        // Onboarding 窗口（已存在则提到前面）
         if let existingWindow = onboardingWindow {
             existingWindow.makeKeyAndOrderFront(nil)
             NSApplication.shared.activate(ignoringOtherApps: true)
+            // 通知灵动岛：窗口已就绪，清除 loading 并收起
+            notchManager.consoleDidOpen()
             return
         }
 
-        // 隐藏宠物
         hidePetWindow()
 
-        // 创建 onboarding 窗口
         let vm = self.onboardingVM
         let onboardingView = OnboardingView(
             viewModel: vm,
@@ -141,34 +151,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         let hostingController = NSHostingController(rootView: onboardingView)
-
         let window = NSWindow(contentViewController: hostingController)
         window.title = "DeskMate - 初始化设置"
         window.styleMask = [.titled, .closable, .miniaturizable]
         window.center()
         window.isReleasedWhenClosed = false
-
         window.delegate = self
         onboardingWindow = window
 
         window.makeKeyAndOrderFront(nil)
         NSApplication.shared.activate(ignoringOtherApps: true)
+
+        // 通知灵动岛：窗口已就绪，清除 loading 并收起
+        notchManager.consoleDidOpen()
     }
 
-    // MARK: - 主控制台窗口（MainPage）
+    // MARK: - 主控制台窗口
 
-    private func openMainConsole() {
-        NSLog("[AppDelegate] openMainConsole: 打开主控制台")
-        // 隐藏桌面宠物
-        hidePetWindow()
-
-        // 如果主窗口已存在，直接提到前面
-        if let existing = mainWindow {
-            NSLog("[AppDelegate] openMainConsole: 主窗口已存在，直接显示")
-            existing.makeKeyAndOrderFront(nil)
-            NSApplication.shared.activate(ignoringOtherApps: true)
-            return
-        }
+    /// 静默预加载主控制台窗口 — 在启动后延迟创建窗口实例但不显示，
+    /// 这样点击灵动岛时只需 orderFront，避免 SwiftUI 视图初始化导致的卡顿。
+    private func preloadMainWindow() {
+        guard mainWindow == nil else { return }
+        NSLog("[AppDelegate] preloadMainWindow: 静默预加载主控制台窗口")
 
         let mainView = MainPage()
         let hostingController = NSHostingController(rootView: mainView)
@@ -180,46 +184,103 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.minSize = NSSize(width: 800, height: 550)
         window.center()
         window.isReleasedWhenClosed = false
+        window.delegate = self
+        mainWindow = window
+        // 不调用 makeKeyAndOrderFront，保持隐藏
+    }
 
+    private func openMainConsole() {
+        NSLog("[AppDelegate] openMainConsole: 打开主控制台")
+
+        // 环境缺失守卫：Python/Hermes venv 不存在则重置 onboarding 标志并跳转 OnboardingView
+        guard isHermesEnvironmentReady() else {
+            NSLog("[AppDelegate] Hermes 环境缺失，重定向到 Onboarding")
+            UserDefaults.standard.set(false, forKey: "onboarding_completed")
+            mainWindow?.close()
+            mainWindow = nil
+            openConsole()
+            return
+        }
+
+        hidePetWindow()
+
+        if let existing = mainWindow {
+            existing.makeKeyAndOrderFront(nil)
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            // 通知灵动岛：控制台已就绪，清除 loading 并收起
+            notchManager.consoleDidOpen()
+            NSLog("[AppDelegate] openMainConsole: 启动 Gateway")
+            startHermesGatewayIfNeeded()
+            startGatewayMonitoring()
+            return
+        }
+
+        // 兜底：未预加载时即时创建（此时灵动岛已展示 loading）
+        let mainView = MainPage()
+        let hostingController = NSHostingController(rootView: mainView)
+
+        let window = NSWindow(contentViewController: hostingController)
+        window.title = "DeskMate"
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.setContentSize(NSSize(width: 900, height: 620))
+        window.minSize = NSSize(width: 800, height: 550)
+        window.center()
+        window.isReleasedWhenClosed = false
         window.delegate = self
         mainWindow = window
 
         window.makeKeyAndOrderFront(nil)
         NSApplication.shared.activate(ignoringOtherApps: true)
 
-        NSLog("[AppDelegate] openMainConsole: 主窗口已显示，启动 Gateway")
-        // 启动 Hermes Gateway（对齐 Flutter app.dart 中 startGateway 调用）
+        // 通知灵动岛：控制台已就绪，清除 loading 并收起
+        notchManager.consoleDidOpen()
+
+        NSLog("[AppDelegate] openMainConsole: 启动 Gateway")
         startHermesGatewayIfNeeded()
+        startGatewayMonitoring()
     }
 
-    /// 在后台异步启动 Hermes Gateway — 对齐 Flutter app.dart 中的启动逻辑。
-    ///
-    /// 仅在 Gateway 尚未启动时调用。
-    /// 异步执行不阻塞 UI；启动失败仅记录日志。
+    /// 启动 Gateway 连接状态周期探测并立即刷新一次。
+    private func startGatewayMonitoring() {
+        GatewayConnectionManager.shared.startMonitoring()
+        Task { await GatewayConnectionManager.shared.refresh() }
+    }
+
+    /// 检测 Hermes 运行环境是否就绪（Python venv 是否存在）。
+    /// 镜像 HermesGatewayService.startGateway 的早退判断。
+    private func isHermesEnvironmentReady() -> Bool {
+        let hermesHome = AppConstants.resolveHermesHome()
+        let pythonPath = "\(hermesHome)/\(AppConstants.hermesAgentDir)/\(AppConstants.hermesVenvDir)/bin/python"
+        return FileManager.default.fileExists(atPath: pythonPath)
+    }
+
+    // MARK: - Hermes Gateway
+
     private func startHermesGatewayIfNeeded() {
-        NSLog("[AppDelegate] startHermesGatewayIfNeeded: 调用, gatewayStarted=\(gatewayStarted)")
-        guard !gatewayStarted else {
-            NSLog("[AppDelegate] startHermesGatewayIfNeeded: 已启动过，跳过")
-            return
-        }
-        gatewayStarted = true // 防止重复启动
-        NSLog("[AppDelegate] startHermesGatewayIfNeeded: 异步启动 Hermes Gateway...")
+        NSLog("[AppDelegate] startHermesGatewayIfNeeded: gatewayStarted=\(gatewayStarted)")
+        guard !gatewayStarted else { return }
+        gatewayStarted = true
 
         Task.detached(priority: .userInitiated) {
-            NSLog("[AppDelegate] Task.detached: 开始执行 startGateway")
             let started = await HermesGatewayService.shared.startGateway()
-            NSLog("[AppDelegate] Task.detached: startGateway 返回 \(started)")
             await MainActor.run {
                 if started {
                     NSLog("[AppDelegate] Hermes Gateway 启动成功")
+                    Task { await GatewayConnectionManager.shared.refresh() }
                 } else {
                     NSLog("[AppDelegate] Hermes Gateway 启动失败")
-                    self.gatewayStarted = false // 允许下次重试
+                    self.gatewayStarted = false
+                    // 环境缺失时重置 onboarding 标志，下次打开控制台会跳转 OnboardingView
+                    if !self.isHermesEnvironmentReady() {
+                        NSLog("[AppDelegate] Hermes 环境缺失，重置 onboarding_completed")
+                        UserDefaults.standard.set(false, forKey: "onboarding_completed")
+                    }
                 }
             }
         }
-        NSLog("[AppDelegate] startHermesGatewayIfNeeded: Task.detached 已派发")
     }
+
+    // MARK: - 宠物窗口 显示/隐藏
 
     private func closeOnboardingAndShowPet() {
         onboardingWindow?.close()
@@ -228,27 +289,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func hidePetWindow() {
-        // 隐藏时立即重置拖拽状态
-        viewModel.resetDragState()
-        NSApplication.shared.windows.first?.orderOut(nil)
+        petWindowController?.hide()
     }
 
     private func showPetWindow() {
-        // 显示前先重置拖拽状态，确保初始动画是 run
-        viewModel.resetDragState()
-        NSApplication.shared.windows.first?.makeKeyAndOrderFront(nil)
-        // 多次延迟重置，覆盖 mouseDownTimer(0.25s) 等所有可能的时序问题
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-            self?.viewModel.resetDragState()
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            self?.viewModel.resetDragState()
-        }
+        petWindowController?.showPet()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        // WebView 模式：窗口关闭即退出进程；
-        // 正常模式：保留进程（继续显示宠物/状态栏托盘）。
         isWebViewMode
     }
 }
@@ -260,11 +308,25 @@ extension AppDelegate: NSWindowDelegate {
         if notification.object as? NSWindow == onboardingWindow {
             onboardingWindow = nil
             showPetWindow()
+            // 控制台关闭：恢复灵动岛悬浮展开能力
+            notchManager.consoleDidClose()
+            restoreAccessoryPolicy()
         }
         if notification.object as? NSWindow == mainWindow {
             mainWindow = nil
-            // 关闭主控制台时重新显示桌面宠物
             showPetWindow()
+            // 控制台关闭：恢复灵动岛悬浮展开能力
+            notchManager.consoleDidClose()
+            restoreAccessoryPolicy()
+            GatewayConnectionManager.shared.stopMonitoring()
+        }
+    }
+
+    /// 控制台关闭后恢复隐藏 Dock 图标
+    private func restoreAccessoryPolicy() {
+        // 仅当所有控制台窗口都已关闭时才隐藏 Dock
+        if onboardingWindow == nil && mainWindow == nil {
+            NSApplication.shared.setActivationPolicy(.accessory)
         }
     }
 }

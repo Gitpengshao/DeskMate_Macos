@@ -1,8 +1,8 @@
 import AppKit
 
 final class PetAnimationManager {
-    private var runFrames: [NSImage] = []
-    private var dragFrames: [NSImage] = []
+    private var framesByKind: [PetAnimation: [NSImage]] = [:]
+    private(set) var currentAnimation: PetAnimation = .run
     private var currentFrameIndex: Int = 0
     private var animTick: Int = 0
     private let animSpeedDivider: Int = 3
@@ -12,9 +12,10 @@ final class PetAnimationManager {
     // MARK: - Sprite Sheet Loading
 
     func loadSpriteSheets() {
-        runFrames = sliceSpriteSheet(config: SpriteSheets.run)
-        dragFrames = sliceSpriteSheet(config: SpriteSheets.drag)
-        currentFrame = runFrames.first
+        for kind in [PetAnimation.run, .drag, .think, .work, .sleep] {
+            framesByKind[kind] = sliceSpriteSheet(config: kind.config)
+        }
+        currentFrame = framesByKind[.run]?.first
     }
 
     private func sliceSpriteSheet(config: SpriteSheetConfig) -> [NSImage] {
@@ -51,33 +52,38 @@ final class PetAnimationManager {
         return frames
     }
 
+    // MARK: - Animation Switching
+
+    func setAnimation(_ kind: PetAnimation) {
+        guard framesByKind[kind] != nil else { return }
+        guard currentAnimation != kind else { return }
+        currentAnimation = kind
+        currentFrameIndex = 0
+        animTick = 0
+        currentFrame = framesByKind[kind]?.first
+    }
+
+    func resetToRun() {
+        setAnimation(.run)
+    }
+
+    func resetToDrag() {
+        setAnimation(.drag)
+    }
+
     // MARK: - Animation Tick
 
     func tick(isDragging: Bool) {
         animTick += 1
         if animTick % animSpeedDivider == 0 {
-            advanceFrame(isDragging: isDragging)
+            let kind: PetAnimation = isDragging ? .drag : currentAnimation
+            advanceFrame(kind: kind)
         }
     }
 
-    private func advanceFrame(isDragging: Bool) {
-        let frames = isDragging ? dragFrames : runFrames
-        guard !frames.isEmpty else { return }
+    private func advanceFrame(kind: PetAnimation) {
+        guard let frames = framesByKind[kind], !frames.isEmpty else { return }
         currentFrameIndex = (currentFrameIndex + 1) % frames.count
         currentFrame = frames[currentFrameIndex]
-    }
-
-    // MARK: - State Reset
-
-    func resetToRun() {
-        currentFrameIndex = 0
-        animTick = 0
-        currentFrame = runFrames.first
-    }
-
-    func resetToDrag() {
-        currentFrameIndex = 0
-        animTick = 0
-        currentFrame = dragFrames.first
     }
 }

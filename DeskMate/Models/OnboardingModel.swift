@@ -170,6 +170,8 @@ struct OnboardingModel {
     var mirrorUrl: String?
     var installStartTime: Date?
     var currentDownloadingItem: String?
+    /// 实时安装日志尾部（多行），供 UI 展示真实输出，替代假进度条观感。
+    var installLogTail: String?
 
     // Step 3: Welcome Guide
     var selectedAiModel: String? = "auto"
@@ -201,7 +203,7 @@ struct OnboardingModel {
     /// Whether the user can advance from the current step.
     var canAdvance: Bool {
         if currentStep == 0 { return isEnvironmentReady || hasRunEnvironmentCheck }
-        if currentStep == 1 { return downloadProgress >= 1.0 && !isInstalling }
+        if currentStep == 1 { return downloadProgress >= 1.0 && !isInstalling && !isInstallFailed }
         if currentStep == 2 { return isWelcomeStepValid }
         return true
     }

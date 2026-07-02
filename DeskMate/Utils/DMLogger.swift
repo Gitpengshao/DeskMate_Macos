@@ -12,14 +12,14 @@ enum DMLogger {
 
     // MARK: - Private
 
-    private static let dateFormatter: DateFormatter = {
+    private nonisolated static let dateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
         return f
     }()
 
     /// 统一输出日志
-    private static func emit(
+    private nonisolated static func emit(
         _ message: String,
         name: String,
         level: String,
@@ -41,7 +41,7 @@ enum DMLogger {
     // MARK: - Public
 
     /// 普通日志（对应 Flutter developer.log）
-    static func log(
+    nonisolated static func log(
         _ message: String,
         name: String,
         file: String = #file,
@@ -51,7 +51,7 @@ enum DMLogger {
     }
 
     /// 错误日志
-    static func error(
+    nonisolated static func error(
         _ message: String,
         name: String,
         file: String = #file,
