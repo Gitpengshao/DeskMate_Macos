@@ -4,7 +4,6 @@ import Combine
 final class PetViewModel: ObservableObject {
     @Published var facingRight = true
     @Published var isDragging = false
-    @Published var isTired = false
     @Published var currentFrame: NSImage?
     @Published var petSize: CGSize
 
@@ -37,22 +36,6 @@ final class PetViewModel: ObservableObject {
             if value {
                 self.animationManager.resetToDrag()
             } else {
-                // 拖拽结束：若 pet 处于 tired 状态，保持 sleep 动画；否则回到 run
-                if self.behaviorManager.isTired {
-                    self.animationManager.setAnimation(.sleep)
-                } else {
-                    self.animationManager.resetToRun()
-                }
-            }
-            self.currentFrame = self.animationManager.currentFrame
-        }
-
-        behaviorManager.onTiredStateChanged = { [weak self] value in
-            guard let self = self else { return }
-            self.isTired = value
-            if value {
-                self.animationManager.setAnimation(.sleep)
-            } else {
                 self.animationManager.resetToRun()
             }
             self.currentFrame = self.animationManager.currentFrame
@@ -64,16 +47,6 @@ final class PetViewModel: ObservableObject {
         behaviorManager.window = window
         behaviorManager.setupMouseMonitoring()
         behaviorManager.startWalking()
-    }
-
-    func playAnimation(_ kind: PetAnimation) {
-        animationManager.setAnimation(kind)
-        currentFrame = animationManager.currentFrame
-    }
-
-    /// 双击唤醒：让 pet 从 tired/sleep 状态回到 run。
-    func wakeUp() {
-        behaviorManager.wakeUp()
     }
 
     func stopAllTimers() {

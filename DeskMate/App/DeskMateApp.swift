@@ -44,6 +44,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let notchManager = DynamicNotchManager.shared
     private var onboardingWindow: NSWindow?
     private var mainWindow: NSWindow?
+    /// 预构造的 `NSHostingController<MainPage>`，仅持有 rootView，未触发 body 求值。
+    /// 真正构造 NSWindow / 访问 view 会推迟到 `continueOpenMainConsole` 中执行。
+    private var preloadedHostingController: NSHostingController<MainPage>?
     private var gatewayStarted: Bool = false
 
     /// WebView 模式的目标 URL
@@ -86,7 +89,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let onboardingCompleted = UserDefaults.standard.bool(forKey: "onboarding_completed")
             NSLog("[AppDelegate] onboarding_completed = \(onboardingCompleted)")
             if onboardingCompleted {
-                self.startHermesGatewayIfNeeded()
+                // 在后台线程启动 Gateway，避免主线程阻塞导致桌宠动画卡顿
+                Task.detached(priority: .userInitiated) { [weak self] in
+                    await self?.startHermesGatewayIfNeeded()
+                }
                 // 6. 静默预加载主控制台窗口，避免点击灵动岛后卡顿
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
                     self?.preloadMainWindow()
@@ -168,32 +174,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - 主控制台窗口
 
-    /// 静默预加载主控制台窗口 — 在启动后延迟创建窗口实例但不显示，
-    /// 这样点击灵动岛时只需 orderFront，避免 SwiftUI 视图初始化导致的卡顿。
+    /// 静默预加载主控制台视图 — 仅预构造 `NSHostingController<MainPage>` 并缓存。
+    ///
+    /// **重要：不要在这里创建 NSWindow**。`NSWindow(contentViewController:)` 会访问
+    /// `controller.view`，触发 SwiftUI body 求值；body 求值会通过 `@StateObject`
+    /// 调用 `MainViewModel.init()`，其中 `self.model = MainModel(...)` 触发
+    /// `@Published.willSet` → `objectWillChange.send()`，而此时正处于 view update
+    /// 阶段，于是 SwiftUI 报"Modifying state during view update" 警告，并卡一帧。
+    ///
+    /// 正确做法：只构造 `NSHostingController`（其内部仅持有 rootView，不触发 body
+    /// 求值），把 NSWindow 构造推迟到 `continueOpenMainConsole` 中（用户点击灵动岛
+    /// 时），此时已有用户交互预期，可接受一帧 body 求值延迟。
     private func preloadMainWindow() {
-        guard mainWindow == nil else { return }
-        NSLog("[AppDelegate] preloadMainWindow: 静默预加载主控制台窗口")
+        guard preloadedHostingController == nil, mainWindow == nil else { return }
+        NSLog("[AppDelegate] preloadMainWindow: 静默预构造 hosting controller（不触发 body 求值）")
 
-        let mainView = MainPage()
-        let hostingController = NSHostingController(rootView: mainView)
-
-        let window = NSWindow(contentViewController: hostingController)
-        window.title = "DeskMate"
-        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        window.setContentSize(NSSize(width: 900, height: 620))
-        window.minSize = NSSize(width: 800, height: 550)
-        window.center()
-        window.isReleasedWhenClosed = false
-        window.delegate = self
-        mainWindow = window
-        // 不调用 makeKeyAndOrderFront，保持隐藏
+        Task.detached(priority: .userInitiated) { [weak self] in
+            // 在主线程上构造 hosting controller（MainViewModel 是 @MainActor）
+            let controller = await MainActor.run {
+                NSHostingController(rootView: MainPage())
+            }
+            await MainActor.run { [weak self] in
+                self?.preloadedHostingController = controller
+            }
+        }
     }
 
     private func openMainConsole() {
         NSLog("[AppDelegate] openMainConsole: 打开主控制台")
 
+        // 异步环境检查，避免主线程文件 I/O 阻塞影响桌宠动画
+        Task { [weak self] in
+            guard let self = self else { return }
+            let envReady = await self.isHermesEnvironmentReady()
+            await MainActor.run {
+                self.continueOpenMainConsole(envReady: envReady)
+            }
+        }
+    }
+
+    /// `openMainConsole` 的主线程续接 — 环境检查通过后展示主控制台窗口。
+    private func continueOpenMainConsole(envReady: Bool) {
         // 环境缺失守卫：Python/Hermes venv 不存在则重置 onboarding 标志并跳转 OnboardingView
-        guard isHermesEnvironmentReady() else {
+        guard envReady else {
             NSLog("[AppDelegate] Hermes 环境缺失，重定向到 Onboarding")
             UserDefaults.standard.set(false, forKey: "onboarding_completed")
             mainWindow?.close()
@@ -210,14 +233,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // 通知灵动岛：控制台已就绪，清除 loading 并收起
             notchManager.consoleDidOpen()
             NSLog("[AppDelegate] openMainConsole: 启动 Gateway")
-            startHermesGatewayIfNeeded()
+            // 在后台线程启动 Gateway，避免主线程阻塞
+            Task.detached(priority: .userInitiated) { [weak self] in
+                await self?.startHermesGatewayIfNeeded()
+            }
             startGatewayMonitoring()
             return
         }
 
         // 兜底：未预加载时即时创建（此时灵动岛已展示 loading）
-        let mainView = MainPage()
-        let hostingController = NSHostingController(rootView: mainView)
+        // 优先复用预构造的 NSHostingController（preload 阶段未触发 body 求值）
+        let hostingController: NSHostingController<MainPage>
+        if let preloaded = preloadedHostingController {
+            hostingController = preloaded
+            preloadedHostingController = nil
+        } else {
+            hostingController = NSHostingController(rootView: MainPage())
+        }
 
         let window = NSWindow(contentViewController: hostingController)
         window.title = "DeskMate"
@@ -236,7 +268,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notchManager.consoleDidOpen()
 
         NSLog("[AppDelegate] openMainConsole: 启动 Gateway")
-        startHermesGatewayIfNeeded()
+        // 在后台线程启动 Gateway，避免主线程阻塞
+        Task.detached(priority: .userInitiated) { [weak self] in
+            await self?.startHermesGatewayIfNeeded()
+        }
         startGatewayMonitoring()
     }
 
@@ -246,12 +281,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { await GatewayConnectionManager.shared.refresh() }
     }
 
-    /// 检测 Hermes 运行环境是否就绪（Python venv 是否存在）。
+    /// 异步检测 Hermes 运行环境是否就绪（Python venv 是否存在）。
     /// 镜像 HermesGatewayService.startGateway 的早退判断。
-    private func isHermesEnvironmentReady() -> Bool {
-        let hermesHome = AppConstants.resolveHermesHome()
-        let pythonPath = "\(hermesHome)/\(AppConstants.hermesAgentDir)/\(AppConstants.hermesVenvDir)/bin/python"
-        return FileManager.default.fileExists(atPath: pythonPath)
+    /// 在后台线程执行文件 I/O，避免主线程卡顿影响桌宠动画。
+    private func isHermesEnvironmentReady() async -> Bool {
+        await Task.detached(priority: .userInitiated) {
+            let hermesHome = AppConstants.resolveHermesHome()
+            let pythonPath = "\(hermesHome)/\(AppConstants.hermesAgentDir)/\(AppConstants.hermesVenvDir)/bin/python"
+            return FileManager.default.fileExists(atPath: pythonPath)
+        }.value
     }
 
     // MARK: - Hermes Gateway
@@ -263,6 +301,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         Task.detached(priority: .userInitiated) {
             let started = await HermesGatewayService.shared.startGateway()
+            // 异步环境检查，避免在 MainActor 上做文件 I/O 阻塞
+            let envReady = await self.isHermesEnvironmentReady()
             await MainActor.run {
                 if started {
                     NSLog("[AppDelegate] Hermes Gateway 启动成功")
@@ -271,7 +311,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     NSLog("[AppDelegate] Hermes Gateway 启动失败")
                     self.gatewayStarted = false
                     // 环境缺失时重置 onboarding 标志，下次打开控制台会跳转 OnboardingView
-                    if !self.isHermesEnvironmentReady() {
+                    if !envReady {
                         NSLog("[AppDelegate] Hermes 环境缺失，重置 onboarding_completed")
                         UserDefaults.standard.set(false, forKey: "onboarding_completed")
                     }

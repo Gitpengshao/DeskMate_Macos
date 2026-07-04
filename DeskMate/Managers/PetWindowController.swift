@@ -100,11 +100,6 @@ final class PetWindowController: NSObject {
     // MARK: - Actions
 
     @objc private func handleDoubleClick(_ gesture: NSClickGestureRecognizer) {
-        // 走累了打瞌睡时双击优先唤醒；非 tired 状态下才打开控制台
-        if viewModel.isTired {
-            viewModel.wakeUp()
-        } else {
-            onDoubleClick?()
-        }
+        onDoubleClick?()
     }
 }
