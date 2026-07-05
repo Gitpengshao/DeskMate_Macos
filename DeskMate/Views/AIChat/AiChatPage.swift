@@ -41,7 +41,50 @@ struct AiChatPage: View {
             chatVM.loadCurrentModel()
             // 从 ~/.hermes/config.yaml 读取当前工作区目录。
             chatVM.loadWorkingDirectory()
+            // 兜底消费：用户可能先在工作区窗口添加了引用，再切到 AI 对话页。
+            // 用 async 避免 "Modifying state during view update" 警告。
+            DispatchQueue.main.async { self.consumePendingReference() }
         }
+        .onReceive(WorkspaceReferenceBridge.shared.$pendingReference) { _ in
+            // bridge 发布新值时立刻消费，覆盖"AI 对话页已在前台"的场景。
+            // ⚠️ onReceive 在 SwiftUI 更新周期中触发，必须 async 到下一帧
+            // 才能安全地修改 @Published 状态，否则会触发运行时警告并可能导致
+            // 本次 UI 更新丢失。
+            DispatchQueue.main.async { self.consumePendingReference() }
+        }
+    }
+
+    // MARK: - Cross-window reference ingestion
+
+    /// 消费 `WorkspaceReferenceBridge` 中待加入的引用 — 转发给 `chatVM.addReference`。
+    ///
+    /// 同时把主窗口前置，确保用户能看到引用 chip 已添加。多次相同路径的
+    /// 入队会被 `addReference` 内部去重（按 `id == path`）。
+    ///
+    /// # 防御性校验
+    /// 通过 `FileManager` 重新确认 `isDirectory`，防止上游 (`FileTreeView` context menu 等)
+    /// 传入错误值导致文件被错误地视为目录。
+    private func consumePendingReference() {
+        guard let pending = WorkspaceReferenceBridge.shared.pendingReference else { return }
+
+        DMLogger.log(
+            "Consume bridge: path=\(pending.path) bridgeIsDir=\(pending.isDirectory)",
+            name: "AiChatPage"
+        )
+
+        // 用 FileManager 重新确认 isDirectory，消除上游传入错误值的可能性
+        var isDir: ObjCBool = false
+        let fileExists = FileManager.default.fileExists(atPath: pending.path, isDirectory: &isDir)
+        let actualIsDir = fileExists ? isDir.boolValue : pending.isDirectory
+
+        DMLogger.log(
+            "Consume bridge: fileExists=\(fileExists) fmIsDir=\(actualIsDir) → using=\(actualIsDir)",
+            name: "AiChatPage"
+        )
+
+        chatVM.addReference(path: pending.path, isDirectory: actualIsDir)
+        WorkspaceReferenceBridge.shared.consume()
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     // MARK: - File picker
@@ -79,7 +122,8 @@ struct AiChatPage: View {
                 sidebarVisible: chatVM.model.sidebarVisible,
                 isDark: isDark,
                 onToggleSidebar: { chatVM.toggleSidebar() },
-                currentModel: chatVM.model.currentModel
+                currentModel: chatVM.model.currentModel,
+                workingDirectory: chatVM.model.workingDirectory
             )
 
             if chatVM.model.isLoading && !chatVM.model.isStreaming {

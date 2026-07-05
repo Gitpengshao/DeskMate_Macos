@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		D363A4FE5A034140B0FE59C9 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 1FD642CCDA3D42F48D4101CD /* MarkdownUI */; };
+		D4E5F6A7B8C9D0E1F2A3B4C5 /* CodeEditSourceEditor in Frameworks */ = {isa = PBXBuildFile; productRef = B2C3D4E5F6A7B8C9D0E1F2A3 /* CodeEditSourceEditor */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -28,6 +29,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				D363A4FE5A034140B0FE59C9 /* MarkdownUI in Frameworks */,
+				D4E5F6A7B8C9D0E1F2A3B4C5 /* CodeEditSourceEditor in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -71,6 +73,7 @@
 			name = DeskMate;
 			packageProductDependencies = (
 				1FD642CCDA3D42F48D4101CD /* MarkdownUI */,
+				B2C3D4E5F6A7B8C9D0E1F2A3 /* CodeEditSourceEditor */,
 			);
 			productName = DeskMate;
 			productReference = 903EBBBE2FEAD44400735AA4 /* DeskMate.app */;
@@ -102,6 +105,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				8E503BA6F6164B1DB4168BD0 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
+				A1B2C3D4E5F6A7B8C9D0E1F2 /* XCRemoteSwiftPackageReference "CodeEditSourceEditor" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 903EBBBF2FEAD44400735AA4 /* Products */;
@@ -346,6 +350,14 @@
 				minimumVersion = 2.0.0;
 			};
 		};
+		A1B2C3D4E5F6A7B8C9D0E1F2 /* XCRemoteSwiftPackageReference "CodeEditSourceEditor" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/CodeEditApp/CodeEditSourceEditor";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.15.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -353,6 +365,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 8E503BA6F6164B1DB4168BD0 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
 			productName = MarkdownUI;
+		};
+		B2C3D4E5F6A7B8C9D0E1F2A3 /* CodeEditSourceEditor */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1B2C3D4E5F6A7B8C9D0E1F2 /* XCRemoteSwiftPackageReference "CodeEditSourceEditor" */;
+			productName = CodeEditSourceEditor;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

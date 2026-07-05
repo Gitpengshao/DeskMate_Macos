@@ -119,7 +119,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupPetWindow() {
         let controller = PetWindowController(viewModel: viewModel)
         controller.onDoubleClick = { [weak self] in
-            self?.notchManager.show()
+            guard let self = self else { return }
+            self.viewModel.wakeUp()
+            self.notchManager.show()
         }
         controller.show()
         petWindowController = controller

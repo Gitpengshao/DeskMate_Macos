@@ -43,7 +43,7 @@ enum SpriteSheets {
     static let think = SpriteSheetConfig(
         imageName: "think",
         columns: 6,
-        totalFrames: 26,
+        totalFrames: 41,
         frameSize: 90
     )
 
@@ -57,7 +57,7 @@ enum SpriteSheets {
     static let sleep = SpriteSheetConfig(
         imageName: "sleep",
         columns: 6,
-        totalFrames: 36,
+        totalFrames: 34,
         frameSize: 180
     )
 

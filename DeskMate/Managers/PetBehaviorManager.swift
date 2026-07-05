@@ -6,6 +6,7 @@ final class PetBehaviorManager {
     var onTick: (() -> Void)?
     var onFacingRightChanged: ((Bool) -> Void)?
     var onDragStateChanged: ((Bool) -> Void)?
+    var onSleepStateChanged: ((Bool) -> Void)?
 
     // MARK: - State
 
@@ -17,11 +18,19 @@ final class PetBehaviorManager {
     private(set) var isDragging = false
     private(set) var facingRight = true
 
+    /// 行走 tick 计数器，达到阈值后进入睡眠
+    private var walkTickCount: Int = 0
+    private let sleepTickThreshold: Int = 600  // ~10s @ 60fps
+
+    private(set) var isSleeping = false
+
     weak var window: NSWindow?
 
     // MARK: - Walking Behavior
 
     func startWalking() {
+        walkTickCount = 0
+        isSleeping = false
         walkTimer?.invalidate()
         walkTimer = Timer.scheduledTimer(withTimeInterval: 0.016, repeats: true) { [weak self] _ in
             self?.onTick?()
@@ -30,7 +39,21 @@ final class PetBehaviorManager {
     }
 
     private func walkStep() {
-        guard let window = window, !isDragging else { return }
+        guard let window = window else { return }
+
+        // 睡眠中不可移动
+        if isSleeping { return }
+
+        // 计数行走 tick（不拖拽时才累计）
+        if !isDragging {
+            walkTickCount += 1
+            if walkTickCount >= sleepTickThreshold {
+                enterSleep()
+                return
+            }
+        }
+
+        guard !isDragging else { return }
         guard let screen = window.screen ?? NSScreen.main else { return }
 
         let screenFrame = screen.visibleFrame
@@ -54,6 +77,21 @@ final class PetBehaviorManager {
         window.setFrame(windowFrame, display: true)
     }
 
+    // MARK: - Sleep / Wake
+
+    private func enterSleep() {
+        isSleeping = true
+        walkTickCount = 0
+        onSleepStateChanged?(true)
+    }
+
+    func wakeUp() {
+        guard isSleeping else { return }
+        isSleeping = false
+        walkTickCount = 0
+        onSleepStateChanged?(false)
+    }
+
     // MARK: - Mouse Drag Handling
 
     func setupMouseMonitoring() {
@@ -69,6 +107,8 @@ final class PetBehaviorManager {
             switch event.type {
             case .leftMouseDown:
                 if isInPetWindow {
+                    // 在鼠标按下时唤醒（无论是点击还是拖拽的开始）
+                    if isSleeping { wakeUp() }
                     self.handleMouseDown()
                 }
             case .leftMouseUp:

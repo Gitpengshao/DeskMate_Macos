@@ -22,7 +22,7 @@ final class PetViewModel: ObservableObject {
     private func setupBindings() {
         behaviorManager.onTick = { [weak self] in
             guard let self = self else { return }
-            self.animationManager.tick(isDragging: self.isDragging)
+            self.animationManager.tick()
             self.currentFrame = self.animationManager.currentFrame
         }
 
@@ -34,9 +34,19 @@ final class PetViewModel: ObservableObject {
             guard let self = self else { return }
             self.isDragging = value
             if value {
-                self.animationManager.resetToDrag()
+                self.animationManager.switchToDrag()
             } else {
-                self.animationManager.resetToRun()
+                self.animationManager.switchToRun()
+            }
+            self.currentFrame = self.animationManager.currentFrame
+        }
+
+        behaviorManager.onSleepStateChanged = { [weak self] isSleeping in
+            guard let self = self else { return }
+            if isSleeping {
+                self.animationManager.switchToSleep()
+            } else {
+                self.animationManager.switchToRun()
             }
             self.currentFrame = self.animationManager.currentFrame
         }
@@ -59,5 +69,14 @@ final class PetViewModel: ObservableObject {
         animationManager.resetToRun()
         isDragging = false
         currentFrame = animationManager.currentFrame
+    }
+
+    /// 唤醒睡眠中的桌宠（双击触发）
+    func wakeUp() {
+        if behaviorManager.isSleeping {
+            behaviorManager.wakeUp()
+            animationManager.switchToRun()
+            currentFrame = animationManager.currentFrame
+        }
     }
 }

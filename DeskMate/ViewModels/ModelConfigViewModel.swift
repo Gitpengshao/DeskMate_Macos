@@ -36,6 +36,7 @@ final class ModelConfigViewModel: ObservableObject {
     }
 
     /// 默认初始化器，使用全局 Gateway 单例。
+    @MainActor
     convenience init() {
         self.init(
             configWriter: .shared,

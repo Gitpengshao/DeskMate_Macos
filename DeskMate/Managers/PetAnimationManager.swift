@@ -3,10 +3,12 @@ import AppKit
 final class PetAnimationManager {
     private var runFrames: [NSImage] = []
     private var dragFrames: [NSImage] = []
+    private var sleepFrames: [NSImage] = []
     private var currentFrameIndex: Int = 0
     private var animTick: Int = 0
     private let animSpeedDivider: Int = 3
 
+    private(set) var currentAnimation: PetAnimation = .run
     var currentFrame: NSImage?
 
     // MARK: - Sprite Sheet Loading
@@ -14,6 +16,7 @@ final class PetAnimationManager {
     func loadSpriteSheets() {
         runFrames = sliceSpriteSheet(config: SpriteSheets.run)
         dragFrames = sliceSpriteSheet(config: SpriteSheets.drag)
+        sleepFrames = sliceSpriteSheet(config: SpriteSheets.sleep)
         currentFrame = runFrames.first
     }
 
@@ -53,31 +56,56 @@ final class PetAnimationManager {
 
     // MARK: - Animation Tick
 
-    func tick(isDragging: Bool) {
+    func tick() {
         animTick += 1
         if animTick % animSpeedDivider == 0 {
-            advanceFrame(isDragging: isDragging)
+            advanceFrame()
         }
     }
 
-    private func advanceFrame(isDragging: Bool) {
-        let frames = isDragging ? dragFrames : runFrames
+    private func advanceFrame() {
+        let frames: [NSImage]
+        switch currentAnimation {
+        case .run:   frames = runFrames
+        case .drag:  frames = dragFrames
+        case .sleep: frames = sleepFrames
+        case .think, .work: frames = runFrames
+        }
         guard !frames.isEmpty else { return }
         currentFrameIndex = (currentFrameIndex + 1) % frames.count
         currentFrame = frames[currentFrameIndex]
     }
 
-    // MARK: - State Reset
+    // MARK: - Animation State Switch
 
-    func resetToRun() {
+    func switchToRun() {
+        currentAnimation = .run
         currentFrameIndex = 0
         animTick = 0
         currentFrame = runFrames.first
     }
 
-    func resetToDrag() {
+    func switchToDrag() {
+        currentAnimation = .drag
         currentFrameIndex = 0
         animTick = 0
         currentFrame = dragFrames.first
+    }
+
+    func switchToSleep() {
+        currentAnimation = .sleep
+        currentFrameIndex = 0
+        animTick = 0
+        currentFrame = sleepFrames.first
+    }
+
+    // MARK: - State Reset (kept for backward compatibility)
+
+    func resetToRun() {
+        switchToRun()
+    }
+
+    func resetToDrag() {
+        switchToDrag()
     }
 }

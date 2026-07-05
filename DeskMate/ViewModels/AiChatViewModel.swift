@@ -71,6 +71,10 @@ final class AiChatViewModel: ObservableObject {
 
     /// 添加选中的文件/目录引用到输入框。
     func addReference(path: String, isDirectory: Bool) {
+        DMLogger.log(
+            "addReference: path=\(path) isDirectory=\(isDirectory)",
+            name: "AiChatViewModel"
+        )
         let item = ReferenceItem(
             id: path,
             path: path,

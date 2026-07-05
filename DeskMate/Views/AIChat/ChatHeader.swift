@@ -10,6 +10,8 @@ struct ChatHeader: View {
     /// 当前默认模型（从 `~/.hermes/config.yaml` 读取）。
     /// `nil` 表示尚未加载或未配置。
     let currentModel: CurrentModelInfo?
+    /// 当前工作区目录 — 非空时显示"工作区浏览器"入口。
+    let workingDirectory: String?
 
     var body: some View {
         HStack(spacing: 12) {
@@ -47,6 +49,9 @@ struct ChatHeader: View {
 
             Spacer()
 
+            // 工作区浏览器入口 — 仅当工作区已设置时显示
+            workspaceExplorerButton
+
             // 模型指示器 — 数据来自 ~/.hermes/config.yaml 的 model.default
             modelIndicator
         }
@@ -59,6 +64,37 @@ struct ChatHeader: View {
                 .frame(height: 1),
             alignment: .bottom
         )
+    }
+
+    /// 工作区浏览器入口按钮 — 点击打开新窗口，展示目录树 + 代码编辑器。
+    @ViewBuilder
+    private var workspaceExplorerButton: some View {
+        if let dir = workingDirectory, !dir.isEmpty {
+            Button(action: { WorkspaceExplorerWindowManager.open(workingDirectory: dir) }) {
+                HStack(spacing: 5) {
+                    Image(systemName: "square.split.bottomrightquarter")
+                        .font(.system(size: 11, weight: .medium))
+                    Text("工作区")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .foregroundColor(Palette.textSecond)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Palette.bgElevated)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Palette.border, lineWidth: 1)
+                        )
+                )
+            }
+            .buttonStyle(.plain)
+            .onHover { h in
+                if h { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            }
+            .help("打开工作区浏览器 — \(dir)")
+        }
     }
 
     /// 头部右侧的模型徽标。
@@ -102,6 +138,7 @@ struct ChatHeader: View {
 
 private enum Palette {
     static let bgPanel     = Color(red: 0.039, green: 0.039, blue: 0.039)
+    static let bgElevated  = Color(red: 0.078, green: 0.078, blue: 0.078)
     static let border      = Color(red: 0.149, green: 0.149, blue: 0.149)
     static let textPrimary = Color(red: 1.000, green: 1.000, blue: 1.000)
     static let textSecond  = Color(red: 0.640, green: 0.640, blue: 0.640)
