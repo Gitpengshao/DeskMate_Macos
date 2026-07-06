@@ -1,11 +1,11 @@
 import SwiftUI
 
-/// 记忆管理页 — 一比一还原 Flutter `MemoryManagementPage`。
+/// 记忆管理页。
 ///
 /// 三个 Tab：
-/// - **记忆** — `~/.hermes/memories/MEMORY.md` 条目（agent permanent memory / notes）
+/// - **记忆**     — `~/.hermes/memories/MEMORY.md` 条目（agent permanent memory / notes）
 /// - **用户画像** — `~/.hermes/memories/USER.md` 条目（user preferences）
-/// - **Provider** — 外部记忆 Provider 列表（OpenViking 等）
+/// - **灵魂画像** — `~/.hermes/SOUL.md` 文件（agent soul / personality，仅可修改）
 ///
 /// UI 风格：黑白主题，灰阶区分层次，无圆角装饰边框。
 struct MemoryManagementPage: View {
@@ -37,9 +37,16 @@ struct MemoryManagementPage: View {
         }
         .preferredColorScheme(.dark)
         .sheet(isPresented: $showAddSheet) {
+            let target: MemoryTarget = {
+                switch viewModel.model.activeTab {
+                case .userProfile: return .user
+                case .soulProfile: return .soul
+                case .memory:      return .memory
+                }
+            }()
             MMEntryEditorSheet(
                 viewModel: viewModel,
-                target: viewModel.model.activeTab == .userProfile ? .user : .memory,
+                target: target,
                 editingEntry: nil
             )
         }
@@ -52,14 +59,6 @@ struct MemoryManagementPage: View {
         }
         .sheet(item: $deletingEntry) { entry in
             MMDeleteConfirmDialog(viewModel: viewModel, entry: entry)
-        }
-        .sheet(isPresented: Binding(
-            get: { viewModel.model.isShowingPythonPicker },
-            set: { newValue in
-                if !newValue { viewModel.dismissPythonPicker() }
-            }
-        )) {
-            MMPythonPickerSheet(viewModel: viewModel)
         }
         .onDisappear { viewModel.dispose() }
     }
@@ -77,19 +76,17 @@ struct MemoryManagementPage: View {
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundColor(MMPalette.textPrimary)
                 }
-                Text("管理 Agent 永久记忆、用户画像与外部 Provider")
+                Text("管理 Agent 永久记忆、用户画像与灵魂画像")
                     .font(.system(size: 12))
                     .foregroundColor(MMPalette.textMuted)
             }
             Spacer()
             Button(action: {
                 Task {
-                    if viewModel.model.activeTab == .memory {
-                        await viewModel.loadMemories()
-                    } else if viewModel.model.activeTab == .userProfile {
-                        await viewModel.loadUserProfile()
-                    } else {
-                        await viewModel.initProviderState()
+                    switch viewModel.model.activeTab {
+                    case .memory:      await viewModel.loadMemories()
+                    case .userProfile: await viewModel.loadUserProfile()
+                    case .soulProfile: await viewModel.loadSoulProfile()
                     }
                 }
             }) {
@@ -126,8 +123,8 @@ struct MemoryManagementPage: View {
             memoryTabContent
         case .userProfile:
             userProfileTabContent
-        case .providers:
-            providersTabContent
+        case .soulProfile:
+            soulProfileTabContent
         }
     }
 
@@ -145,6 +142,7 @@ struct MemoryManagementPage: View {
                         MMMemoryItemRow(
                             index: idx + 1,
                             entry: entry,
+                            canDelete: true,
                             onEdit: { editingEntry = entry },
                             onDelete: { deletingEntry = entry }
                         )
@@ -170,6 +168,7 @@ struct MemoryManagementPage: View {
                         MMMemoryItemRow(
                             index: idx + 1,
                             entry: entry,
+                            canDelete: true,
                             onEdit: { editingEntry = entry },
                             onDelete: { deletingEntry = entry }
                         )
@@ -181,19 +180,64 @@ struct MemoryManagementPage: View {
         }
     }
 
-    // Provider Tab
+    // SOUL.md Tab
     @ViewBuilder
-    private var providersTabContent: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                ForEach(kBuiltInMemoryProviders) { provider in
-                    MMProviderCard(provider: provider, viewModel: viewModel)
+    private var soulProfileTabContent: some View {
+        if viewModel.model.isLoadingSoulProfile {
+            MMLoadingView(title: MMText.loadingSoul)
+        } else if viewModel.model.soulProfileEntries.isEmpty {
+            soulEmptyState
+        } else {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(viewModel.model.soulProfileEntries) { entry in
+                        MMMemoryItemRow(
+                            index: 1,
+                            entry: entry,
+                            canDelete: false,
+                            onEdit: { editingEntry = entry },
+                            onDelete: {}
+                        )
+                    }
                 }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 16)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 16)
-            .padding(.bottom, 20)
         }
+    }
+
+    private var soulEmptyState: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 36, weight: .light))
+                .foregroundColor(MMPalette.textMuted)
+            Text(MMText.emptySoul)
+                .font(.system(size: 13))
+                .foregroundColor(MMPalette.textMuted)
+            Button(action: {
+                editingEntry = MemoryEntry(target: .soul, index: 0, content: "")
+            }) {
+                HStack(spacing: 6) {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 12, weight: .medium))
+                    Text("编辑灵魂画像")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .foregroundColor(MMPalette.textPrimary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(MMPalette.bgHover)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(MMPalette.border, lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

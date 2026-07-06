@@ -291,6 +291,7 @@ nonisolated final class AgentService {
     // ---- Gateway per-profile ----
 
     /// 启动某 profile 的 gateway — 对齐 `hermes -p <name> gateway start`。
+    /// 注意：`gateway start` 不支持 `--port` 参数，端口通过 `API_SERVER_PORT` 环境变量 / `.env` 控制。
     @discardableResult
     func startGateway(profile: String, port: Int = AppConstants.defaultGatewayPort) async -> Bool {
         DMLogger.log(
@@ -298,7 +299,7 @@ nonisolated final class AgentService {
             name: "AgentService"
         )
         return await runProfileCliBool(
-            args: ["-p", profile, "gateway", "start", "--port", "\(port)"],
+            args: ["-p", profile, "gateway", "start"],
             timeout: 30
         )
     }

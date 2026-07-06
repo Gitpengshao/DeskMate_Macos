@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 // MARK: - GCPalette (复用 MCPalette 色值，保持黑白主题一致)
 
@@ -17,88 +18,6 @@ enum GCPalette {
     static let accentInk    = Color(red: 0.000, green: 0.000, blue: 0.000)
     static let good         = Color(red: 0.30, green: 0.85, blue: 0.40)
     static let bad          = Color(red: 0.95, green: 0.30, blue: 0.30)
-}
-
-// MARK: - ConfigCard
-
-/// 带标题的分组容器卡片。
-struct ConfigCard<Content: View>: View {
-    let title: String
-    let subtitle: String?
-    let content: Content
-
-    init(title: String, subtitle: String? = nil, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.subtitle = subtitle
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(title)
-                    .font(.system(size: 12.5, weight: .semibold))
-                    .foregroundColor(GCPalette.textPrimary)
-                    .tracking(0.2)
-                if let subtitle = subtitle {
-                    Text(subtitle)
-                        .font(.system(size: 11))
-                        .foregroundColor(GCPalette.textTertiary)
-                }
-                Spacer()
-            }
-            .padding(.horizontal, 14)
-            .padding(.top, 12)
-            .padding(.bottom, 8)
-
-            content
-                .padding(.horizontal, 14)
-                .padding(.bottom, 12)
-        }
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(GCPalette.bgPanel)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(GCPalette.border, lineWidth: 1)
-                )
-        )
-    }
-}
-
-// MARK: - ConfigRow
-
-/// label + 控件的对齐行。label 固定宽度，控件占据剩余空间。
-struct ConfigRow<Control: View>: View {
-    let label: String
-    let hint: String?
-    let control: Control
-
-    init(label: String, hint: String? = nil, @ViewBuilder control: () -> Control) {
-        self.label = label
-        self.hint = hint
-        self.control = control()
-    }
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(label)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(GCPalette.textSecond)
-                if let hint = hint {
-                    Text(hint)
-                        .font(.system(size: 10.5))
-                        .foregroundColor(GCPalette.textTertiary)
-                }
-            }
-            .frame(width: 130, alignment: .leading)
-
-            control
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.vertical, 6)
-    }
 }
 
 // MARK: - PrimaryButton / SecondaryButton
@@ -179,81 +98,6 @@ struct SecondaryButton: View {
     }
 }
 
-// MARK: - GCTextField / GCSecureField / GCPicker
-
-struct GCTextField: View {
-    let placeholder: String
-    @Binding var text: String
-
-    var body: some View {
-        TextField(placeholder, text: $text)
-            .font(.system(size: 12.5))
-            .textFieldStyle(.plain)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(GCPalette.bgElevated)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(GCPalette.border, lineWidth: 1)
-                    )
-            )
-            .foregroundColor(GCPalette.textPrimary)
-    }
-}
-
-struct GCSecureField: View {
-    let placeholder: String
-    @Binding var text: String
-
-    var body: some View {
-        SecureField(placeholder, text: $text)
-            .font(.system(size: 12.5))
-            .textFieldStyle(.plain)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(GCPalette.bgElevated)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(GCPalette.border, lineWidth: 1)
-                    )
-            )
-            .foregroundColor(GCPalette.textPrimary)
-    }
-}
-
-struct GCPicker: View {
-    let label: String
-    let options: [(value: String, label: String)]
-    @Binding var selection: String
-
-    var body: some View {
-        Picker(label, selection: $selection) {
-            ForEach(options, id: \.value) { opt in
-                Text(opt.label).tag(opt.value)
-            }
-        }
-        .pickerStyle(.menu)
-        .labelsHidden()
-        .font(.system(size: 12.5))
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(GCPalette.bgElevated)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(GCPalette.border, lineWidth: 1)
-                )
-        )
-        .foregroundColor(GCPalette.textPrimary)
-    }
-}
-
 // MARK: - StatusDot
 
 struct StatusDot: View {
@@ -303,29 +147,86 @@ struct InteractiveConsoleSheet: View {
                 alignment: .bottom
             )
 
-            // 输出区
-            ScrollViewReader { proxy in
-                ScrollView {
-                    Text(viewModel.interactiveOutput.isEmpty ? "（等待输出...）" : viewModel.interactiveOutput)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(GCPalette.textPrimary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(12)
-                        .id("output-end")
-                        .textSelection(.enabled)
-                }
-                .background(Color.black)
-                .onChange(of: viewModel.interactiveOutput) { _ in
-                    withAnimation {
-                        proxy.scrollTo("output-end", anchor: .bottom)
+            // 输出区 + 二维码
+            HStack(spacing: 0) {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        Text(viewModel.interactiveOutput.isEmpty ? "（等待输出...）" : viewModel.interactiveOutput)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(GCPalette.textPrimary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(12)
+                            .id("output-end")
+                            .textSelection(.enabled)
                     }
+                    .background(Color.black)
+                    .onChange(of: viewModel.interactiveOutput) { _ in
+                        withAnimation {
+                            proxy.scrollTo("output-end", anchor: .bottom)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                if let url = detectedURL {
+                    Divider().background(GCPalette.border)
+
+                    VStack(spacing: 14) {
+                        if let qrImage = qrCodeImage(for: url) {
+                            Image(nsImage: qrImage)
+                                .resizable()
+                                .interpolation(.none)
+                                .frame(width: 200, height: 200)
+                                .background(Color.white)
+                                .cornerRadius(8)
+                        }
+
+                        Text("使用微信扫码")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(GCPalette.textPrimary)
+
+                        Text(url)
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundColor(GCPalette.textTertiary)
+                            .lineLimit(3)
+                            .multilineTextAlignment(.center)
+
+                        HStack(spacing: 8) {
+                            SecondaryButton(title: "复制链接", icon: "doc.on.doc") {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(url, forType: .string)
+                            }
+
+                            if let linkURL = URL(string: url) {
+                                SecondaryButton(title: "打开链接", icon: "safari") {
+                                    NSWorkspace.shared.open(linkURL)
+                                }
+                            }
+                        }
+                    }
+                    .frame(width: 260)
+                    .padding(20)
+                    .background(GCPalette.bgPanel)
                 }
             }
 
             // 输入栏（仅交互式 setup 进程运行时显示；安装类命令无 stdin）
             if viewModel.lastExitCode == nil && viewModel.interactiveTitle.contains("setup") {
                 HStack(spacing: 8) {
-                    GCTextField(placeholder: "输入选择或凭据后回车...", text: $inputText)
+                    TextField("输入选择或凭据后回车...", text: $inputText)
+                        .font(.system(size: 12.5))
+                        .textFieldStyle(.plain)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(GCPalette.bgElevated)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(GCPalette.border, lineWidth: 1)
+                                )
+                        )
+                        .foregroundColor(GCPalette.textPrimary)
                         .onSubmit {
                             sendCurrent()
                         }
@@ -350,11 +251,9 @@ struct InteractiveConsoleSheet: View {
                     }
                 }
                 Spacer()
-                SecondaryButton(title: viewModel.lastExitCode == nil ? "在 Terminal 打开" : "刷新配置", icon: viewModel.lastExitCode == nil ? "terminal" : "arrow.clockwise") {
-                    if viewModel.lastExitCode == nil {
+                if viewModel.lastExitCode == nil {
+                    SecondaryButton(title: "在 Terminal 打开", icon: "terminal") {
                         viewModel.openSetupInTerminal()
-                    } else {
-                        viewModel.loadAll()
                     }
                 }
                 PrimaryButton(title: "关闭", icon: nil) {
@@ -369,7 +268,7 @@ struct InteractiveConsoleSheet: View {
                 alignment: .top
             )
         }
-        .frame(minWidth: 640, minHeight: 480)
+        .frame(width: 960, height: 620)
         .background(Color.black)
     }
 
@@ -378,5 +277,55 @@ struct InteractiveConsoleSheet: View {
         guard !text.isEmpty else { return }
         viewModel.sendInput(text)
         inputText = ""
+    }
+
+    // MARK: - QR Code detection & rendering
+
+    /// 从控制台输出中提取最可能是登录二维码的 URL。
+    private var detectedURL: String? {
+        let text = viewModel.interactiveOutput
+        guard let regex = try? NSRegularExpression(pattern: "https?://[A-Za-z0-9\\-\\._~:/?#\\[\\]@!$&'()*+,;=%]+", options: []) else {
+            return nil
+        }
+        let matches = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+
+        // 优先匹配微信/飞书等登录二维码链接
+        for match in matches {
+            guard let range = Range(match.range, in: text) else { continue }
+            let url = String(text[range]).trimmingCharacters(in: .punctuationCharacters)
+            let lowercased = url.lowercased()
+            if lowercased.contains("liteapp.weixin.qq.com")
+                || lowercased.contains("wx.qq.com")
+                || lowercased.contains("qr")
+                || lowercased.contains("login") {
+                return url
+            }
+        }
+
+        // 兜底：返回第一个 URL
+        if let first = matches.first,
+           let range = Range(first.range, in: text) {
+            return String(text[range]).trimmingCharacters(in: .punctuationCharacters)
+        }
+        return nil
+    }
+
+    /// 用 Core Image 的 CIQRCodeGenerator 生成二维码 NSImage。
+    private func qrCodeImage(for string: String) -> NSImage? {
+        guard let data = string.data(using: .utf8),
+              let filter = CIFilter(name: "CIQRCodeGenerator") else { return nil }
+        filter.setValue(data, forKey: "inputMessage")
+        filter.setValue("M", forKey: "inputCorrectionLevel")
+        guard let ciImage = filter.outputImage else { return nil }
+
+        let scale: CGFloat = 12
+        let scaled = ciImage.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let size = NSSize(width: scaled.extent.width, height: scaled.extent.height)
+
+        let rep = NSCIImageRep(ciImage: scaled)
+        rep.size = size
+        let image = NSImage(size: size)
+        image.addRepresentation(rep)
+        return image
     }
 }

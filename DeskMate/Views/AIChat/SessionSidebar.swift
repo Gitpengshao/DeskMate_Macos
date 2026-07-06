@@ -221,8 +221,16 @@ struct SessionItem: View {
     }
 
     private var sessionTitleText: String {
-        let id = session.id
-        return id.count > 20 ? String(id.prefix(20)) + "..." : id
+        let text: String
+        if !session.preview.isEmpty {
+            text = session.preview
+        } else if !session.title.isEmpty {
+            text = session.title
+        } else {
+            text = session.id
+        }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.count > 24 ? String(trimmed.prefix(24)) + "..." : trimmed
     }
 
     private var subtitleText: String {

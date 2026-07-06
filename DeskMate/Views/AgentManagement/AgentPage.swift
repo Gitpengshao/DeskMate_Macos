@@ -1,31 +1,19 @@
 import SwiftUI
 import AppKit
 
-/// 多智能体协同页 — 一比一还原官方 Hermes profiles 文档的可视化配置：
-/// https://hermes-agent.nousresearch.com/docs/zh-Hans/user-guide/profiles
-/// https://hermes-agent.nousresearch.com/docs/zh-Hans/user-guide/profile-distributions
+/// 多智能体协同页 — 简化为左侧智能体列表 + 右侧会话。
 ///
 /// 布局：
 /// ```
-/// ┌────────────────────────────────────────────────────────────────────┐
-/// │ 多智能体协同  副标题                                  刷新 文档  安装 │
-/// │                                                          + 新建     │
-/// ├──────────────────────┬─────────────────────────────────────────────┤
-/// │ 搜索框 / 计数 chips  │  [头像] profile.id  [active]  [distrib@ver]  │
-/// │  ☐ 仅 distribution   │  description ...                            │
-/// │ ──────────────────── │ ─────────────────────────────────────────── │
-/// │ 列表行 (选中)        │ AgentDetailSectionHeader 基本信息            │
-/// │ 列表行               │  field1    value                            │
-/// │ 列表行               │  field2    value                            │
-/// │ 列表行               │ AgentDetailSectionHeader 运行时              │
-/// │ ...                  │  field     value                            │
-/// │                      │ AgentDetailSectionHeader Distribution        │
-/// │                      │  ...                                        │
-/// │                      │ AgentDetailSectionHeader Gateway            │
-/// │                      │  [启动] [停止] [安装为服务]                  │
-/// │                      │ AgentDetailSectionHeader 危险操作            │
-/// │                      │  [重命名] [导出] [删除]                     │
-/// └──────────────────────┴─────────────────────────────────────────────┘
+/// ┌────────────────────────────────────────────────────────────┐
+/// │ 多智能体协同  副标题                         刷新    + 新建 │
+/// ├──────────────────────┬─────────────────────────────────────┤
+/// │ 搜索框 / 计数 chips  │                                     │
+/// │ ──────────────────── │   AiChatPage（按 profile 隔离）      │
+/// │ 列表行 (选中)        │                                     │
+/// │ 列表行               │                                     │
+/// │ ...                  │                                     │
+/// └──────────────────────┴─────────────────────────────────────┘
 /// ```
 struct AgentPage: View {
 
@@ -37,10 +25,12 @@ struct AgentPage: View {
 
     /// 对话框可见性
     @State private var showNewProfileDialog: Bool = false
-    @State private var showInstallDistributionDialog: Bool = false
     @State private var showRenameDialog: Bool = false
     @State private var showDeleteDialog: Bool = false
     @State private var showDescribeDialog: Bool = false
+
+    /// 当前正在操作的 profile（用于行内编辑/删除，不依赖左侧选中态）。
+    @State private var dialogProfile: AgentProfile? = nil
 
     // MARK: - Init
 
@@ -57,21 +47,18 @@ struct AgentPage: View {
         .sheet(isPresented: $showNewProfileDialog) {
             NewAgentProfileDialog(viewModel: viewModel)
         }
-        .sheet(isPresented: $showInstallDistributionDialog) {
-            InstallDistributionDialog(viewModel: viewModel)
-        }
         .sheet(isPresented: $showRenameDialog) {
-            if let p = viewModel.model.selectedProfile {
+            if let p = dialogProfile {
                 RenameAgentProfileDialog(viewModel: viewModel, profile: p)
             }
         }
         .sheet(isPresented: $showDeleteDialog) {
-            if let p = viewModel.model.selectedProfile {
+            if let p = dialogProfile {
                 DeleteAgentProfileDialog(viewModel: viewModel, profile: p)
             }
         }
         .sheet(isPresented: $showDescribeDialog) {
-            if let p = viewModel.model.selectedProfile {
+            if let p = dialogProfile {
                 DescribeAgentProfileDialog(viewModel: viewModel, profile: p)
             }
         }
@@ -85,12 +72,6 @@ struct AgentPage: View {
         .background(
             Button("") { showNewProfileDialog = true }
                 .keyboardShortcut("n", modifiers: .command)
-                .opacity(0).frame(width: 0, height: 0)
-        )
-        // ⌘I 安装 distribution
-        .background(
-            Button("") { showInstallDistributionDialog = true }
-                .keyboardShortcut("i", modifiers: [.command, .shift])
                 .opacity(0).frame(width: 0, height: 0)
         )
         // 页面每次出现时触发一次静默后台刷新：
@@ -157,24 +138,6 @@ struct AgentPage: View {
                                     .foregroundColor(AgentPalette.textMuted)
                             }
                         }
-                        if let active = viewModel.model.activeProfile {
-                            HStack(spacing: 4) {
-                                Circle()
-                                    .fill(AgentPalette.statusRunning)
-                                    .frame(width: 6, height: 6)
-                                Text("\(AgentText.currentActive): \(active.id)")
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundColor(AgentPalette.textMuted)
-                            }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(
-                                Capsule().fill(AgentPalette.bgElevated)
-                            )
-                            .overlay(
-                                Capsule().stroke(AgentPalette.border, lineWidth: 0.5)
-                            )
-                        }
                     }
                     Text(AgentText.pageSubtitle)
                         .font(.system(size: 12))
@@ -185,8 +148,7 @@ struct AgentPage: View {
                 Spacer()
                 AgentToolbar(
                     viewModel: viewModel,
-                    onNewProfile: { showNewProfileDialog = true },
-                    onInstallDistribution: { showInstallDistributionDialog = true }
+                    onNewProfile: { showNewProfileDialog = true }
                 )
             }
         }
@@ -195,7 +157,7 @@ struct AgentPage: View {
         .padding(.bottom, 16)
     }
 
-    // MARK: - Content Row (left list + right detail)
+    // MARK: - Content Row (left list + right chat)
 
     @ViewBuilder
     private var contentRow: some View {
@@ -211,8 +173,8 @@ struct AgentPage: View {
                     alignment: .trailing
                 )
 
-            // 右侧：详情
-            detailPanel
+            // 右侧：会话
+            chatPanel
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
@@ -246,7 +208,19 @@ struct AgentPage: View {
                         AgentProfileRow(
                             profile: p,
                             isSelected: p.id == viewModel.model.selectedProfileId,
-                            onTap: { viewModel.selectProfile(p.id) }
+                            onTap: { Task { await viewModel.selectProfile(p.id) } },
+                            onDescribe: {
+                                dialogProfile = p
+                                showDescribeDialog = true
+                            },
+                            onRename: {
+                                dialogProfile = p
+                                showRenameDialog = true
+                            },
+                            onDelete: {
+                                dialogProfile = p
+                                showDeleteDialog = true
+                            }
                         )
                     }
                 }
@@ -256,346 +230,63 @@ struct AgentPage: View {
         }
     }
 
-    // MARK: - Detail Panel
+    // MARK: - Chat Panel
 
     @ViewBuilder
-    private var detailPanel: some View {
-        if let profile = viewModel.model.selectedProfile {
-            profileDetailScroll(profile: profile)
+    private var chatPanel: some View {
+        let profileId = viewModel.model.selectedProfileId
+        if !profileId.isEmpty {
+            if viewModel.preparingProfileId == profileId {
+                preparingView(profileId: profileId)
+            } else if let container = viewModel.chatContainer(for: profileId) {
+                AiChatPage(chatVM: container.chatVM, sessionVM: container.sessionVM, isDark: true)
+            } else {
+                startFailedView(profileId: profileId)
+            }
         } else {
-            // 没有任何 profile 时显示空状态
-            VStack(spacing: 14) {
-                Image(systemName: "person.2")
-                    .font(.system(size: 36, weight: .light))
-                    .foregroundColor(AgentPalette.textMuted)
-                Text("请选择左侧的 profile 查看详情")
-                    .font(.system(size: 13))
-                    .foregroundColor(AgentPalette.textMuted)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            AgentEmptyView(onNewProfile: { showNewProfileDialog = true })
         }
     }
 
-    @ViewBuilder
-    private func profileDetailScroll(profile: AgentProfile) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                // ---- Header Card ----
-                profileHeaderCard(profile)
-                    .padding(.top, 22)
-
-                // ---- 基本信息 ----
-                sectionBlock(title: "基本信息", icon: "info.circle") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        AgentFieldRow(
-                            label: AgentText.fieldId,
-                            value: profile.id,
-                            monospaced: true
-                        )
-                        AgentFieldRow(
-                            label: AgentText.fieldAlias,
-                            value: profile.alias,
-                            monospaced: true
-                        )
-                        AgentFieldRow(
-                            label: AgentText.fieldPath,
-                            value: profile.path,
-                            monospaced: true
-                        )
-                        AgentFieldRow(
-                            label: AgentText.fieldDescription,
-                            value: profile.description,
-                            multiline: true
-                        )
-                        // 编辑描述按钮
-                        HStack {
-                            Spacer()
-                            DetailActionButton(
-                                title: AgentText.editDescription,
-                                systemImage: "pencil",
-                                action: { showDescribeDialog = true }
-                            )
-                        }
-                    }
-                }
-
-                // ---- 运行时 ----
-                sectionBlock(title: "运行时", icon: "cpu") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        AgentFieldRow(
-                            label: AgentText.fieldModel,
-                            value: profile.model.isEmpty
-                                ? "未配置"
-                                : profile.model,
-                            monospaced: true
-                        )
-                        AgentFieldRow(
-                            label: AgentText.fieldProvider,
-                            value: profile.provider.isEmpty
-                                ? "—"
-                                : profile.provider,
-                            monospaced: true
-                        )
-                        AgentFieldRow(
-                            label: AgentText.fieldSkills,
-                            value: "\(profile.skillsCount)"
-                        )
-                        AgentFieldRow(
-                            label: AgentText.fieldCron,
-                            value: "\(profile.cronCount)"
-                        )
-                        if !profile.installedAt.isEmpty {
-                            AgentFieldRow(
-                                label: AgentText.fieldInstalledAt,
-                                value: profile.installedAt,
-                                monospaced: true
-                            )
-                        }
-                    }
-                }
-
-                // ---- Distribution ----
-                if profile.isDistribution {
-                    sectionBlock(title: "Distribution", icon: "shippingbox.fill") {
-                        VStack(alignment: .leading, spacing: 10) {
-                            AgentFieldRow(
-                                label: AgentText.fieldDistName,
-                                value: profile.distributionName,
-                                monospaced: true
-                            )
-                            AgentFieldRow(
-                                label: AgentText.fieldDistVersion,
-                                value: profile.distributionVersion,
-                                monospaced: true
-                            )
-                            if !profile.distributionSource.isEmpty {
-                                AgentFieldRow(
-                                    label: AgentText.fieldDistSource,
-                                    value: profile.distributionSource,
-                                    monospaced: true
-                                )
-                            }
-                            if !profile.distributionAuthor.isEmpty {
-                                AgentFieldRow(
-                                    label: AgentText.fieldDistAuthor,
-                                    value: profile.distributionAuthor
-                                )
-                            }
-                            if !profile.distributionLicense.isEmpty {
-                                AgentFieldRow(
-                                    label: AgentText.fieldDistLicense,
-                                    value: profile.distributionLicense
-                                )
-                            }
-                            HStack {
-                                Spacer()
-                                DetailActionButton(
-                                    title: AgentText.updateDistribution,
-                                    systemImage: "arrow.triangle.2.circlepath",
-                                    action: {
-                                        Task { await viewModel.updateDistribution(profile.id) }
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // ---- Gateway ----
-                sectionBlock(title: "Gateway", icon: "antenna.radiowaves.left.and.right") {
-                    VStack(alignment: .leading, spacing: 14) {
-                        HStack(spacing: 10) {
-                            Circle()
-                                .fill(profile.gatewayStatus.dotColor)
-                                .frame(width: 10, height: 10)
-                            Text(profile.gatewayStatus.label)
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(AgentPalette.textPrimary)
-                            Spacer()
-                            Text("进程端口: \(AppConstants.defaultGatewayPort)")
-                                .font(.system(size: 10.5, design: .monospaced))
-                                .foregroundColor(AgentPalette.textMuted)
-                        }
-                        HStack(spacing: 8) {
-                            if profile.gatewayStatus == .running {
-                                DetailActionButton(
-                                    title: AgentText.stopGateway,
-                                    systemImage: "stop.circle",
-                                    action: {
-                                        Task { await viewModel.stopGateway(for: profile.id) }
-                                    }
-                                )
-                            } else {
-                                DetailActionButton(
-                                    title: AgentText.startGateway,
-                                    systemImage: "play.circle",
-                                    style: .primary,
-                                    action: {
-                                        Task { await viewModel.startGateway(for: profile.id) }
-                                    }
-                                )
-                            }
-                            DetailActionButton(
-                                title: AgentText.installService,
-                                systemImage: "gear.badge",
-                                action: {
-                                    Task { await viewModel.installGatewayService(for: profile.id) }
-                                }
-                            )
-                        }
-                        Text("""
-每个 profile 拥有独立的 gateway 进程，使用各自的 bot token。
-若两个 profile 意外使用相同 token，第二个 gateway 会被阻止并报告冲突 profile。
-""")
-                            .font(.system(size: 11))
-                            .foregroundColor(AgentPalette.textMuted)
-                            .lineSpacing(2)
-                    }
-                }
-
-                // ---- 危险操作 ----
-                sectionBlock(title: "危险操作", icon: "exclamationmark.triangle") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack(spacing: 8) {
-                            if !profile.isActive && !profile.isDefault {
-                                DetailActionButton(
-                                    title: AgentText.useAsActive,
-                                    systemImage: "checkmark.circle",
-                                    style: .primary,
-                                    action: {
-                                        Task { await viewModel.useProfile(profile.id) }
-                                    }
-                                )
-                            }
-                            DetailActionButton(
-                                title: AgentText.renameProfile,
-                                systemImage: "pencil",
-                                action: { showRenameDialog = true }
-                            )
-                            DetailActionButton(
-                                title: AgentText.exportProfile,
-                                systemImage: "square.and.arrow.up",
-                                action: {
-                                    Task { await viewModel.exportProfile(profile.id) }
-                                }
-                            )
-                            if !profile.isDefault {
-                                DetailActionButton(
-                                    title: AgentText.deleteProfile,
-                                    systemImage: "trash",
-                                    style: .danger,
-                                    action: { showDeleteDialog = true }
-                                )
-                            } else {
-                                DetailActionButton(
-                                    title: AgentText.defaultProfileHint,
-                                    systemImage: "lock.fill",
-                                    action: {}
-                                )
-                                .disabled(true)
-                                .opacity(0.5)
-                            }
-                        }
-                        if !profile.isDefault {
-                            Text("删除将停止 gateway、移除系统服务、移除命令别名并删除所有 profile 数据。系统会要求输入 profile 名以确认。")
-                                .font(.system(size: 11))
-                                .foregroundColor(AgentPalette.textMuted)
-                                .lineSpacing(2)
-                        }
-                    }
-                }
-
-                Spacer().frame(height: 24)
-            }
-            .padding(.horizontal, 28)
+    private func preparingView(profileId: String) -> some View {
+        VStack(spacing: 16) {
+            ProgressView()
+                .scaleEffect(1.0)
+                .tint(AgentPalette.textPrimary)
+            Text("正在启动 \(profileId) 的 Gateway…")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(AgentPalette.textPrimary)
+            Text("首次切换需要等待 Hermes Gateway 就绪")
+                .font(.system(size: 11))
+                .foregroundColor(AgentPalette.textMuted)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(AgentPalette.bgBase)
     }
 
-    // MARK: - Profile Header Card
-
-    @ViewBuilder
-    private func profileHeaderCard(_ profile: AgentProfile) -> some View {
-        HStack(alignment: .center, spacing: 16) {
-            AgentAvatar(letter: profile.avatarLetter, isActive: profile.isActive, size: 56)
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) {
-                    Text(profile.displayTitle)
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundColor(AgentPalette.textPrimary)
-                    if profile.isDefault {
-                        StatusPill(
-                            text: "默认",
-                            color: AgentPalette.textPrimary,
-                            icon: "star.fill"
-                        )
-                    }
-                    if profile.isActive {
-                        StatusPill(
-                            text: "当前激活",
-                            color: AgentPalette.statusRunning,
-                            icon: "circle.fill"
-                        )
-                    }
-                }
-                if !profile.description.isEmpty {
-                    Text(profile.description)
-                        .font(.system(size: 12))
-                        .foregroundColor(AgentPalette.textMuted)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                HStack(spacing: 10) {
-                    if !profile.model.isEmpty {
-                        HStack(spacing: 4) {
-                            Image(systemName: "cpu")
-                                .font(.system(size: 9))
-                            Text(profile.model)
-                                .font(.system(size: 10.5, design: .monospaced))
-                        }
-                        .foregroundColor(AgentPalette.textMuted)
-                    }
-                    if profile.isDistribution {
-                        DistributionBadge(label: profile.distributionLabel)
-                    }
-                }
+    private func startFailedView(profileId: String) -> some View {
+        VStack(spacing: 16) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 32, weight: .light))
+                .foregroundColor(AgentPalette.textMuted)
+            Text("无法启动 \(profileId) 的 Gateway")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(AgentPalette.textPrimary)
+            Button("重试") {
+                Task { await viewModel.selectProfile(profileId) }
             }
-            Spacer()
-        }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(AgentPalette.cardBg)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(AgentPalette.border, lineWidth: 0.5)
-        )
-    }
-
-    // MARK: - Section Block
-
-    @ViewBuilder
-    private func sectionBlock<Content: View>(
-        title: String,
-        icon: String,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            AgentDetailSectionHeader(icon: icon, title: title)
-                .padding(.top, 2)
-            VStack(alignment: .leading, spacing: 0) {
-                content()
-            }
-            .padding(16)
+            .buttonStyle(.plain)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundColor(AgentPalette.inverseInk)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
             .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(AgentPalette.cardBg)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(AgentPalette.border, lineWidth: 0.5)
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(AgentPalette.inverse)
             )
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(AgentPalette.bgBase)
     }
 }
 

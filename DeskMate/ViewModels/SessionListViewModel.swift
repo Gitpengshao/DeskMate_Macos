@@ -10,16 +10,18 @@ final class SessionListViewModel: ObservableObject {
 
     private let apiService: SessionApiService
 
-    init(gateway: GatewayClient? = nil) {
+    init(gateway: GatewayClient? = nil, profile: String? = nil) {
         // 在 @MainActor 隔离的 init 体内构造默认值，
         // 避免在默认参数（nonisolated 上下文）中调用 main actor-isolated 初始化器。
         // 使用 GatewayClient.shared 以便 HermesGatewayService 启动后注入的 apiKey 生效。
         let resolvedGateway = gateway ?? GatewayClient.shared
-        self.apiService = SessionApiService(client: resolvedGateway)
+        self.apiService = SessionApiService(client: resolvedGateway, profile: profile)
         self.state = SessionStateModel()
     }
 
     /// 拉取全部会话 — 对齐 Flutter `loadSessions`。
+    ///
+    /// 侧边栏标题优先使用 `title`，否则使用后端返回的 `preview`（第一条用户消息）。
     func loadSessions() {
         guard !state.isLoading else { return }
         state.isLoading = true
@@ -28,6 +30,17 @@ final class SessionListViewModel: ObservableObject {
         Task { [weak self] in
             guard let self = self else { return }
             let sessions = await self.apiService.fetchSessions()
+
+            for session in sessions {
+                DMLogger.log(
+                    "SessionListVM session \(session.id): " +
+                    "title=\(session.title), " +
+                    "preview=\(session.preview), " +
+                    "assistantPreview=\(session.assistantPreview)",
+                    name: "SessionListVM"
+                )
+            }
+
             await MainActor.run {
                 DMLogger.log(
                     "SessionListVM: loaded \(sessions.count) sessions",

@@ -11,12 +11,14 @@ final class PetViewModel: ObservableObject {
 
     private let animationManager = PetAnimationManager()
     private let behaviorManager = PetBehaviorManager()
+    private var cancellables = Set<AnyCancellable>()
 
     init() {
-        petSize = SpriteSheets.petSize
+        petSize = SettingsManager.shared.petSize
         animationManager.loadSpriteSheets()
         currentFrame = animationManager.currentFrame
         setupBindings()
+        setupSettingsBindings()
     }
 
     private func setupBindings() {
@@ -78,5 +80,45 @@ final class PetViewModel: ObservableObject {
             animationManager.switchToRun()
             currentFrame = animationManager.currentFrame
         }
+    }
+
+    /// 隐藏宠物窗口时进入睡眠并停止计时器
+    func sleep() {
+        behaviorManager.sleep()
+        behaviorManager.stopAllTimers()
+    }
+
+    /// 显示宠物窗口时唤醒并重新开始行走
+    func wakeUpAndWalk() {
+        behaviorManager.wakeUp()
+        behaviorManager.startWalking()
+        isDragging = false
+        animationManager.switchToRun()
+        currentFrame = animationManager.currentFrame
+    }
+
+    // MARK: - Settings Bindings
+
+    private func setupSettingsBindings() {
+        SettingsManager.shared.$petSizeScale
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                let newSize = SettingsManager.shared.petSize
+                guard self.petSize != newSize else { return }
+                self.petSize = newSize
+                self.resizeWindow(to: newSize)
+            }
+            .store(in: &cancellables)
+    }
+
+    private func resizeWindow(to size: CGSize) {
+        guard let window = window else { return }
+        var frame = window.frame
+        let oldCenter = CGPoint(x: frame.midX, y: frame.midY)
+        frame.size = size
+        frame.origin.x = oldCenter.x - size.width / 2
+        frame.origin.y = oldCenter.y - size.height / 2
+        window.setFrame(frame, display: true, animate: false)
     }
 }

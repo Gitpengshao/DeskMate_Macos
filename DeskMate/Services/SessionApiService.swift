@@ -9,9 +9,9 @@ final class SessionApiService {
     private let client: GatewayClient
     private let cacheURL: URL
 
-    init(client: GatewayClient) {
+    init(client: GatewayClient, profile: String? = nil) {
         self.client = client
-        let hermesHome = AppConstants.resolveHermesHome()
+        let hermesHome = AppConstants.resolveHermesHome(for: profile)
         let url = URL(fileURLWithPath: hermesHome)
             .appendingPathComponent("chat_cache.json")
         self.cacheURL = url
@@ -22,6 +22,13 @@ final class SessionApiService {
     func fetchSessions() async -> [SessionRow] {
         if let json = await client.getSessions(),
            let data = json["data"] as? [[String: Any]] {
+            // 打印原始字段用于确认后端可用字段
+            for (i, raw) in data.prefix(5).enumerated() {
+                DMLogger.log(
+                    "Session raw[\(i)]: \(raw)",
+                    name: "SessionApiService"
+                )
+            }
             let sessions = data.map { SessionRow(from: $0) }
             await saveCache(sessions)
             DMLogger.log(

@@ -1,244 +1,154 @@
 import Foundation
 
-/// Hermes Gateway 进程生命周期管理 — 对齐 Flutter `HermesService` 中
-/// `startGateway` / `stopGateway` / `_ensureApiServerKey` / `_waitForGatewayReady`。
+/// Hermes Gateway 进程生命周期管理 — 支持按 profile 的多进程注册表。
 ///
 /// 负责：
 /// 1. 在应用启动时拉起 `python -m hermes_cli.main gateway run` 子进程
-/// 2. 注入 `.env` 中的 API key 变量到子进程环境
-/// 3. 确保 `~/.hermes/.env` 中存在 `API_SERVER_KEY`
-/// 4. 轮询 `/health` 端点直到 Gateway 就绪（最长 30s）
-/// 5. 应用退出或重启时优雅停止子进程
+/// 2. 默认 profile（`nil` / `default`）固定使用端口 8642
+/// 3. 其它 profile 动态分配独立端口（从 8643 开始扫描可用端口）
+/// 4. 注入 profile 目录下 `.env` 中的 API key 变量到子进程环境
+/// 5. 确保每个 profile 目录下的 `.env` 中存在 `API_SERVER_KEY`
+/// 6. 轮询 `/health` 端点直到 Gateway 就绪（最长 30s）
+/// 7. 应用退出或重启时优雅停止子进程
 final class HermesGatewayService {
 
     /// 单例 —— 全局唯一管理 Gateway 进程。
     static let shared = HermesGatewayService()
 
-    /// 当前运行的 Gateway 子进程（与 Flutter `_gatewayProcess` 等价）。
-    private var gatewayProcess: Process?
+    /// 当前运行的 Gateway 实例注册表，key 为 profile 的规范化值（"" 表示 default）。
+    private actor Registry {
+        var instances: [String: GatewayInstance] = [:]
+    }
+    private let registry = Registry()
 
-    /// 当前 API_SERVER_KEY（与 Flutter `_apiServerKey` 等价）。
+    /// 当前 API_SERVER_KEY（默认 profile 启动时写入，兼容旧代码）。
     private(set) var apiServerKey: String?
 
-    /// 标记 Gateway 是否已就绪（最近一次健康检查通过）。
+    /// 标记默认 Gateway 是否已就绪（兼容旧代码）。
     private(set) var isReady: Bool = false
 
-    /// 当前 Gateway 启动时使用的 Hermes profile。
-    ///
-    /// `nil` 表示默认 profile（`~/.hermes`），非 nil 时表示 `~/.hermes/profiles/<name>`。
-    /// 用于让 AIChat 等工作区配置写入 Gateway 实际读取的 config.yaml。
+    /// 当前 Gateway 启动时使用的 Hermes profile（兼容旧代码，仅记录默认 profile）。
     @MainActor
     private(set) var currentProfile: String?
 
     private init() {}
 
-    // MARK: - Start
+    // MARK: - Multi-process API
 
-    /// 启动 Gateway 进程 — 对齐 Flutter `startGateway`。
+    /// 确保指定 profile 的 Gateway 正在运行；若未运行则启动，若已在运行则直接返回端口与 key。
     ///
-    /// 流程：
-    /// 1. 停止旧进程（避免端口冲突）
-    /// 2. 读取 `~/.hermes/.env`，注入 API key 变量到子进程环境
-    /// 3. 确保 `API_SERVER_KEY` 存在
-    /// 4. 启动 `python -m hermes_cli.main gateway run` 子进程
-    /// 5. 轮询 `/health`（每 2s 一次，最长 30s）
+    /// - Parameter profile: `nil` / `"default"` 表示默认 profile，其它为智能体 profile id。
+    /// - Returns: 运行成功时返回 `(port, apiKey)`，失败返回 `nil`。
+    func ensureGatewayRunning(for profile: String?) async -> (port: Int, apiKey: String)? {
+        let key = registryKey(for: profile)
+        if let instance = await registry.instances[key], instance.process.isRunning {
+            return (instance.port, instance.apiKey)
+        }
+        return await startGatewayInternal(profile: profile)
+    }
+
+    /// 停止指定 profile 的 Gateway。
+    func stopGateway(for profile: String?) async {
+        let key = registryKey(for: profile)
+        guard let instance = await registry.instances[key] else { return }
+
+        DMLogger.log(
+            "stopGateway(for:): 正在停止 Gateway 进程 pid=\(instance.process.processIdentifier) port=\(instance.port)",
+            name: "HermesGateway"
+        )
+        await stopProcess(instance.process, port: instance.port)
+        await registry.instances.removeValue(forKey: key)
+
+        await MainActor.run { [weak self] in
+            if self?.currentProfile == profile { self?.currentProfile = nil }
+        }
+    }
+
+    /// 停止所有已注册的 Gateway 进程。
+    func stopAllGateways() async {
+        let instances = await Array(registry.instances.values)
+        await MainActor.run { [weak self] in
+            self?.currentProfile = nil
+        }
+
+        for instance in instances {
+            DMLogger.log(
+                "stopAllGateways: 停止 pid=\(instance.process.processIdentifier) port=\(instance.port)",
+                name: "HermesGateway"
+            )
+            await stopProcess(instance.process, port: instance.port)
+        }
+        await registry.instances.removeAll()
+    }
+
+    /// 指定 profile 的 Gateway 是否处于就绪状态。
+    func isRunning(profile: String?) async -> Bool {
+        let key = registryKey(for: profile)
+        guard let instance = await registry.instances[key] else { return false }
+        return instance.isReady && instance.process.isRunning
+    }
+
+    /// 构造对应 profile 的 `GatewayClient`（仅当 Gateway 已就绪时返回非 nil）。
+    func client(for profile: String?) async -> GatewayClient? {
+        let key = registryKey(for: profile)
+        guard let instance = await registry.instances[key], instance.isReady else { return nil }
+        return GatewayClient(host: "127.0.0.1", port: instance.port, apiKey: instance.apiKey)
+    }
+
+    // MARK: - Compatibility API
+
+    /// 启动 Gateway 进程 — 对齐旧签名，供默认 profile / 旧调用点使用。
     ///
-    /// - Parameters:
-    ///   - profile: 可选 profile 名称（与 Flutter `--profile` 参数一致）。
-    ///   - port: Gateway 监听端口，默认 8642。
-    /// - Returns: 是否在 30s 内健康检查通过。
+    /// 非默认 profile 且未指定端口时，内部会走动态端口分配。
     @discardableResult
     func startGateway(profile: String? = nil,
                       port: Int = AppConstants.defaultGatewayPort) async -> Bool {
-        NSLog("[HermesGateway] startGateway: 开始, port=\(port)")
-
-        let hermesHome = AppConstants.resolveHermesHome()
-        let pythonPath = hermesPython(hermesHome)
-        NSLog("[HermesGateway] startGateway: hermesHome=\(hermesHome)")
-        NSLog("[HermesGateway] startGateway: pythonPath=\(pythonPath)")
-
-        let fm = FileManager.default
-        let pythonExists = fm.fileExists(atPath: pythonPath)
-        NSLog("[HermesGateway] startGateway: pythonPath 存在=\(pythonExists)")
-        if !pythonExists {
-            // 尝试查找系统 python3 作为 fallback
-            let whichResult = runShellSync("which python3 2>/dev/null || which python 2>/dev/null")
-            NSLog("[HermesGateway] startGateway: 系统 python 查找结果=\(whichResult)")
-            NSLog("[HermesGateway] startGateway: Python 路径不存在: \(pythonPath)")
-            return false
-        }
-
-        // 检查 hermes-agent 目录
-        let agentDir = (hermesHome as NSString).appendingPathComponent("hermes-agent")
-        let agentExists = fm.fileExists(atPath: agentDir)
-        NSLog("[HermesGateway] startGateway: hermes-agent 目录存在=\(agentExists)")
-
-        // 1. 停止旧进程
-        NSLog("[HermesGateway] startGateway: 停止旧 Gateway 进程...")
-        await stopGateway(port: port)
-
-        // 2. 读取 .env
-        let envPath = (hermesHome as NSString).appendingPathComponent(".env")
-        var envVarsFromFile: [String: String] = [:]
-        if let envContent = try? String(contentsOfFile: envPath, encoding: .utf8) {
-            NSLog("[HermesGateway] startGateway: .env 文件内容长度=\(envContent.count)")
-            for line in envContent.split(separator: "\n", omittingEmptySubsequences: false) {
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                guard !trimmed.isEmpty, !trimmed.hasPrefix("#"),
-                      let eqIdx = trimmed.firstIndex(of: "=") else { continue }
-                let key = String(trimmed[..<eqIdx]).trimmingCharacters(in: .whitespaces)
-                var val = String(trimmed[trimmed.index(after: eqIdx)...])
-                    .trimmingCharacters(in: .whitespaces)
-                val = val.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
-                let masked = val.count > 8 ? "\(val.prefix(8))..." : val
-                NSLog("[HermesGateway] startGateway: .env key: \(key)=\(masked)")
-                if !val.isEmpty { envVarsFromFile[key] = val }
-            }
-        } else {
-            NSLog("[HermesGateway] startGateway: .env 文件不存在!")
-        }
-
-        // 3. 确保 API_SERVER_KEY
-        NSLog("[HermesGateway] startGateway: 确保 API_SERVER_KEY...")
-        guard let key = ensureApiServerKey(hermesHome: hermesHome) else {
-            NSLog("[HermesGateway] startGateway: 无法获取/生成 API_SERVER_KEY")
-            return false
-        }
-        apiServerKey = key
-        NSLog("[HermesGateway] startGateway: API_SERVER_KEY 已就绪")
-
-        // 4. 构造启动参数
-        var args = ["-m", "hermes_cli.main"]
-        if let profile = profile {
-            args.append(contentsOf: ["--profile", profile])
-        }
-        args.append(contentsOf: ["gateway", "run"])
-        NSLog("[HermesGateway] startGateway: 启动参数=\(args)")
-
-        // 构造子进程环境
-        var environment = ProcessInfo.processInfo.environment
-        for (k, v) in envVarsFromFile { environment[k] = v }
-        environment["HERMES_HOME"] = hermesHome
-        environment["API_SERVER_ENABLED"] = "true"
-        environment["API_SERVER_PORT"] = String(port)
-        environment["API_SERVER_KEY"] = key
-        environment["GATEWAY_ALLOW_ALL_USERS"] = "true"
-
-        NSLog("[HermesGateway] startGateway: 启动 Gateway 进程 (port=\(port))...")
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: pythonPath)
-        process.arguments = args
-        process.currentDirectoryPath = hermesHome
-        process.environment = environment
-
-        // 捕获 stderr 到日志文件
-        let logDir = (hermesHome as NSString).appendingPathComponent("logs")
-        try? fm.createDirectory(atPath: logDir,
-                                withIntermediateDirectories: true)
-        let logPath = (logDir as NSString)
-            .appendingPathComponent("gateway-\(port)-stderr.log")
-        if !fm.fileExists(atPath: logPath) {
-            fm.createFile(atPath: logPath, contents: nil)
-        }
-        if let stderrHandle = FileHandle(forWritingAtPath: logPath) {
-            stderrHandle.seekToEndOfFile()
-            process.standardError = stderrHandle
-        }
-
-        NSLog("[HermesGateway] startGateway: 调用 process.run()...")
-        do {
-            try process.run()
-        } catch {
-            NSLog("[HermesGateway] startGateway: process.run() 抛出异常: \(error)")
-            NSLog("[HermesGateway] startGateway: 错误域名=\((error as NSError).domain), 代码=\((error as NSError).code)")
-            gatewayProcess = nil
-            isReady = false
-            return false
-        }
-
-        gatewayProcess = process
-        NSLog("[HermesGateway] startGateway: Gateway 进程已启动, pid=\(process.processIdentifier), isRunning=\(process.isRunning)")
-
-        // 5. 轮询健康检查
-        NSLog("[HermesGateway] startGateway: 开始轮询健康检查...")
-        let healthy = await waitForGatewayReady(port: port)
-        NSLog("[HermesGateway] startGateway: 健康检查结果=\(healthy)")
-        isReady = healthy
-
-        // 6. 启动成功后注入 API key 到共享 GatewayClient，并记录当前 profile
-        if healthy, let key = apiServerKey {
-            NSLog("[HermesGateway] startGateway: 注入 API key 到 GatewayClient.shared")
-            await MainActor.run {
-                GatewayClient.shared.setApiKey(key)
-                self.currentProfile = profile?.trimmingCharacters(in: .whitespacesAndNewlines)
-                NSLog("[HermesGateway] startGateway: currentProfile=\(self.currentProfile ?? "default")")
-            }
-        }
-
-        return healthy
+        let result = await startGatewayInternal(profile: profile, preferredPort: port)
+        return result != nil
     }
 
-    // MARK: - Stop
-
-    /// 停止 Gateway 进程 — 对齐 Flutter `stopGateway`。
-    ///
-    /// 发送 SIGTERM，等待 5s；仍未退出则 SIGKILL；最后等待端口释放（最长 3s）。
+    /// 停止指定端口的 Gateway — 兼容旧签名。
     func stopGateway(port: Int = AppConstants.defaultGatewayPort) async {
-        guard let process = gatewayProcess else { return }
-        DMLogger.log(
-            "stopGateway: 正在停止 Gateway 进程 pid=\(process.processIdentifier)",
-            name: "HermesGateway"
-        )
-
-        // SIGTERM
-        kill(process.processIdentifier, SIGTERM)
-
-        // 等待退出（最长 5s）
-        let deadline5 = Date().addingTimeInterval(5)
-        while process.isRunning && Date() < deadline5 {
-            try? await Task.sleep(nanoseconds: 200_000_000) // 0.2s
-        }
-
-        if process.isRunning {
-            DMLogger.log(
-                "stopGateway: Gateway 进程未在5秒内退出，强制 kill",
-                name: "HermesGateway"
-            )
-            kill(process.processIdentifier, SIGKILL)
-            // 再等 3s
-            let deadline3 = Date().addingTimeInterval(3)
-            while process.isRunning && Date() < deadline3 {
-                try? await Task.sleep(nanoseconds: 200_000_000)
-            }
-        }
+        let instances = await Array(registry.instances.values)
+        guard let instance = instances.first(where: { $0.port == port }) else { return }
 
         DMLogger.log(
-            "stopGateway: Gateway 进程已退出",
+            "stopGateway(port:): 正在停止 Gateway 进程 pid=\(instance.process.processIdentifier) port=\(port)",
             name: "HermesGateway"
         )
-        gatewayProcess = nil
-        isReady = false
+        await stopProcess(instance.process, port: port)
+        await registry.instances.removeValue(forKey: registryKey(for: instance.profile))
 
-        // 等待端口释放（最长 3s）
-        let deadlinePort = Date().addingTimeInterval(3)
-        while Date() < deadlinePort {
-            if !isPortInUse(port: port) {
-                DMLogger.log(
-                    "stopGateway: 端口 \(port) 已释放",
-                    name: "HermesGateway"
-                )
-                break
-            }
-            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s
+        await MainActor.run { [weak self] in
+            if self?.currentProfile == instance.profile { self?.currentProfile = nil }
         }
     }
 
     // MARK: - Health
 
+    /// 调用 `/health` 端点 — 对齐 Flutter `GatewayClient.isHealthy`。
+    func isHealthy(port: Int = AppConstants.defaultGatewayPort) async -> Bool {
+        guard let url = URL(string: "http://127.0.0.1:\(port)/health") else {
+            return false
+        }
+        let instance = await instanceFor(port: port)
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 3
+        if let key = instance?.apiKey {
+            req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        }
+        do {
+            let (_, resp) = try await URLSession.shared.data(for: req)
+            if let http = resp as? HTTPURLResponse {
+                return (200..<300).contains(http.statusCode)
+            }
+            return false
+        } catch {
+            return false
+        }
+    }
+
     /// 轮询 /health 直到就绪 — 对齐 Flutter `_waitForGatewayReady`。
-    ///
-    /// 每 2s 检查一次，最长等待 30s；超时后再做一次最终检查。
     func waitForGatewayReady(port: Int = AppConstants.defaultGatewayPort,
                              maxWait: TimeInterval = 30) async -> Bool {
         let deadline = Date().addingTimeInterval(maxWait)
@@ -255,42 +165,220 @@ final class HermesGatewayService {
             NSLog("[HermesGateway] _waitForGatewayReady: 第 \(attempt) 次健康检查失败")
         }
 
-        // 最终检查
         attempt += 1
         NSLog("[HermesGateway] _waitForGatewayReady: 第 \(attempt) 次最终健康检查 (port=\(port))...")
         return await isHealthy(port: port)
     }
 
-    /// 调用 `/health` 端点 — 对齐 Flutter `GatewayClient.isHealthy`。
-    func isHealthy(port: Int = AppConstants.defaultGatewayPort) async -> Bool {
-        guard let url = URL(string: "http://127.0.0.1:\(port)/health") else {
-            return false
+    // MARK: - Internal implementation
+
+    /// 实际启动逻辑。
+    private func startGatewayInternal(profile: String? = nil,
+                                      preferredPort: Int? = nil) async -> (port: Int, apiKey: String)? {
+        let key = registryKey(for: profile)
+        let hermesHome = AppConstants.resolveHermesHome(for: profile)
+        let pythonPath = hermesPython(hermesHome)
+
+        NSLog("[HermesGateway] startGatewayInternal: profile=\(profile ?? "default") hermesHome=\(hermesHome)")
+        NSLog("[HermesGateway] startGatewayInternal: pythonPath=\(pythonPath)")
+
+        let fm = FileManager.default
+        let pythonExists = fm.fileExists(atPath: pythonPath)
+        NSLog("[HermesGateway] startGatewayInternal: pythonPath 存在=\(pythonExists)")
+        if !pythonExists {
+            let whichResult = runShellSync("which python3 2>/dev/null || which python 2>/dev/null")
+            NSLog("[HermesGateway] startGatewayInternal: 系统 python 查找结果=\(whichResult)")
+            NSLog("[HermesGateway] startGatewayInternal: Python 路径不存在: \(pythonPath)")
+            return nil
         }
-        var req = URLRequest(url: url)
-        req.timeoutInterval = 3
-        if let key = apiServerKey {
-            req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+
+        // 端口决策：兼容调用指定了端口；未指定时 default 用 8642，其它动态扫描。
+        let port: Int
+        if let preferred = preferredPort {
+            port = preferred
+        } else if key.isEmpty {
+            port = AppConstants.defaultGatewayPort
+        } else {
+            port = findAvailablePort(startingAt: AppConstants.defaultGatewayPort + 1, maxPort: 8700)
         }
-        do {
-            let (_, resp) = try await URLSession.shared.data(for: req)
-            if let http = resp as? HTTPURLResponse {
-                return (200..<300).contains(http.statusCode)
+        NSLog("[HermesGateway] startGatewayInternal: 使用 port=\(port)")
+
+        // 若该 profile 已有实例，先停止。
+        if let existing = await registry.instances[key] {
+            DMLogger.log(
+                "startGatewayInternal: 发现已有实例，先停止 pid=\(existing.process.processIdentifier)",
+                name: "HermesGateway"
+            )
+            await stopProcess(existing.process, port: existing.port)
+            await registry.instances.removeValue(forKey: key)
+        }
+
+        // 读取 profile 目录下的 .env
+        let envPath = (hermesHome as NSString).appendingPathComponent(".env")
+        var envVarsFromFile: [String: String] = [:]
+        if let envContent = try? String(contentsOfFile: envPath, encoding: .utf8) {
+            NSLog("[HermesGateway] startGatewayInternal: .env 文件内容长度=\(envContent.count)")
+            for line in envContent.split(separator: "\n", omittingEmptySubsequences: false) {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                guard !trimmed.isEmpty, !trimmed.hasPrefix("#"),
+                      let eqIdx = trimmed.firstIndex(of: "=") else { continue }
+                let k = String(trimmed[..<eqIdx]).trimmingCharacters(in: .whitespaces)
+                var v = String(trimmed[trimmed.index(after: eqIdx)...])
+                    .trimmingCharacters(in: .whitespaces)
+                v = v.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+                let masked = v.count > 8 ? "\(v.prefix(8))..." : v
+                NSLog("[HermesGateway] startGatewayInternal: .env key: \(k)=\(masked)")
+                if !v.isEmpty { envVarsFromFile[k] = v }
             }
-            return false
-        } catch {
-            return false
+        } else {
+            NSLog("[HermesGateway] startGatewayInternal: .env 文件不存在!")
         }
+
+        // 确保 API_SERVER_KEY
+        NSLog("[HermesGateway] startGatewayInternal: 确保 API_SERVER_KEY...")
+        guard let keyValue = ensureApiServerKey(hermesHome: hermesHome) else {
+            NSLog("[HermesGateway] startGatewayInternal: 无法获取/生成 API_SERVER_KEY")
+            return nil
+        }
+        NSLog("[HermesGateway] startGatewayInternal: API_SERVER_KEY 已就绪")
+
+        // 构造启动参数
+        // 注意：hermes gateway run 不支持 --port 参数，端口通过 API_SERVER_PORT 环境变量控制。
+        var args = ["-m", "hermes_cli.main"]
+        if let profile = profile, !profile.isEmpty, profile != "default" {
+            args.append(contentsOf: ["--profile", profile])
+        }
+        args.append(contentsOf: ["gateway", "run"])
+        NSLog("[HermesGateway] startGatewayInternal: 启动参数=\(args)")
+
+        // 构造子进程环境
+        var environment = ProcessInfo.processInfo.environment
+        for (k, v) in envVarsFromFile { environment[k] = v }
+        environment["HERMES_HOME"] = hermesHome
+        environment["API_SERVER_ENABLED"] = "true"
+        environment["API_SERVER_PORT"] = String(port)
+        environment["API_SERVER_KEY"] = keyValue
+        environment["GATEWAY_ALLOW_ALL_USERS"] = "true"
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: pythonPath)
+        process.arguments = args
+        process.currentDirectoryPath = hermesHome
+        process.environment = environment
+
+        // 捕获 stderr 到日志文件
+        let logDir = (hermesHome as NSString).appendingPathComponent("logs")
+        try? fm.createDirectory(atPath: logDir, withIntermediateDirectories: true)
+        let logPath = (logDir as NSString)
+            .appendingPathComponent("gateway-\(port)-stderr.log")
+        if !fm.fileExists(atPath: logPath) {
+            fm.createFile(atPath: logPath, contents: nil)
+        }
+        if let stderrHandle = FileHandle(forWritingAtPath: logPath) {
+            stderrHandle.seekToEndOfFile()
+            process.standardError = stderrHandle
+        }
+
+        NSLog("[HermesGateway] startGatewayInternal: 调用 process.run()...")
+        do {
+            try process.run()
+        } catch {
+            NSLog("[HermesGateway] startGatewayInternal: process.run() 抛出异常: \(error)")
+            return nil
+        }
+
+        NSLog("[HermesGateway] startGatewayInternal: Gateway 进程已启动, pid=\(process.processIdentifier), isRunning=\(process.isRunning)")
+
+        // 轮询健康检查
+        NSLog("[HermesGateway] startGatewayInternal: 开始轮询健康检查...")
+        let healthy = await waitForGatewayReady(port: port)
+        NSLog("[HermesGateway] startGatewayInternal: 健康检查结果=\(healthy)")
+
+        if healthy {
+            let instance = GatewayInstance(
+                process: process,
+                port: port,
+                apiKey: keyValue,
+                profile: profile,
+                isReady: true
+            )
+            await registry.instances.updateValue(instance, forKey: key)
+
+            await MainActor.run { [weak self] in
+                self?.apiServerKey = keyValue
+                if key.isEmpty {
+                    GatewayClient.shared.setApiKey(keyValue)
+                    self?.currentProfile = profile?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    self?.isReady = true
+                }
+            }
+            return (port, keyValue)
+        } else {
+            await stopProcess(process, port: port)
+            return nil
+        }
+    }
+
+    /// 停止单个进程并等待端口释放。
+    private func stopProcess(_ process: Process, port: Int) async {
+        guard process.isRunning else { return }
+
+        kill(process.processIdentifier, SIGTERM)
+
+        let deadline5 = Date().addingTimeInterval(5)
+        while process.isRunning && Date() < deadline5 {
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
+
+        if process.isRunning {
+            DMLogger.log(
+                "stopProcess: Gateway 未在5秒内退出，强制 kill",
+                name: "HermesGateway"
+            )
+            kill(process.processIdentifier, SIGKILL)
+            let deadline3 = Date().addingTimeInterval(3)
+            while process.isRunning && Date() < deadline3 {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+        }
+
+        let deadlinePort = Date().addingTimeInterval(3)
+        while Date() < deadlinePort {
+            if !isPortInUse(port: port) {
+                DMLogger.log("stopProcess: 端口 \(port) 已释放", name: "HermesGateway")
+                break
+            }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+        }
+    }
+
+    /// 根据端口查找已注册实例。
+    private func instanceFor(port: Int) async -> GatewayInstance? {
+        await registry.instances.values.first(where: { $0.port == port })
+    }
+
+    /// 规范化注册表 key。
+    private func registryKey(for profile: String?) -> String {
+        let normalized = profile?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return normalized.isEmpty || normalized == "default" ? "" : normalized
+    }
+
+    /// 扫描可用端口。
+    private func findAvailablePort(startingAt: Int, maxPort: Int) -> Int {
+        for port in startingAt...maxPort {
+            if !isPortInUse(port: port) {
+                return port
+            }
+        }
+        return maxPort
     }
 
     // MARK: - API_SERVER_KEY
 
-    /// 确保 `~/.hermes/.env` 中存在 `API_SERVER_KEY` — 对齐 Flutter `_ensureApiServerKey`。
-    ///
-    /// 若已存在非空值则直接返回；否则生成 64 位十六进制随机 key 并追加到 `.env`。
+    /// 确保指定 hermesHome 的 `.env` 中存在 `API_SERVER_KEY`。
     private func ensureApiServerKey(hermesHome: String) -> String? {
         let envPath = (hermesHome as NSString).appendingPathComponent(".env")
 
-        // 1. 查找现有 key
         if let content = try? String(contentsOfFile: envPath, encoding: .utf8) {
             for line in content.split(separator: "\n", omittingEmptySubsequences: false) {
                 let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -300,37 +388,24 @@ final class HermesGatewayService {
                 let value = String(trimmed[trimmed.index(after: eqIdx)...])
                     .trimmingCharacters(in: .whitespaces)
                 if key == "API_SERVER_KEY", !value.isEmpty {
-                    DMLogger.log(
-                        "_ensureApiServerKey: found existing key",
-                        name: "HermesGateway"
-                    )
+                    DMLogger.log("_ensureApiServerKey: found existing key", name: "HermesGateway")
                     return value
                 }
             }
         }
 
-        // 2. 生成新 key
-        DMLogger.log(
-            "_ensureApiServerKey: generating new key",
-            name: "HermesGateway"
-        )
+        DMLogger.log("_ensureApiServerKey: generating new key", name: "HermesGateway")
         var bytes = [UInt8](repeating: 0, count: 32)
         let status = SecRandomCopyBytes(kSecRandomDefault, 32, &bytes)
         guard status == errSecSuccess else {
-            DMLogger.error(
-                "_ensureApiServerKey: SecRandomCopyBytes failed: \(status)",
-                name: "HermesGateway"
-            )
+            DMLogger.error("_ensureApiServerKey: SecRandomCopyBytes failed: \(status)", name: "HermesGateway")
             return nil
         }
         let newKey = bytes.map { String(format: "%02x", $0) }.joined()
 
-        // 3. 确保目录存在
         let fm = FileManager.default
-        try? fm.createDirectory(atPath: hermesHome,
-                                withIntermediateDirectories: true)
+        try? fm.createDirectory(atPath: hermesHome, withIntermediateDirectories: true)
 
-        // 4. 追加到 .env
         let existing = (try? String(contentsOfFile: envPath, encoding: .utf8)) ?? ""
         var newContent = existing
         if !newContent.isEmpty && !newContent.hasSuffix("\n") {
@@ -342,10 +417,7 @@ final class HermesGatewayService {
             try newContent.write(toFile: envPath, atomically: true, encoding: .utf8)
             return newKey
         } catch {
-            DMLogger.error(
-                "_ensureApiServerKey: 写入 .env 失败: \(error)",
-                name: "HermesGateway"
-            )
+            DMLogger.error("_ensureApiServerKey: 写入 .env 失败: \(error)", name: "HermesGateway")
             return nil
         }
     }
@@ -353,10 +425,10 @@ final class HermesGatewayService {
     // MARK: - Helpers
 
     /// 与 Flutter `AppConstants.hermesPython` 一致：
-    /// `{hermesHome}/hermes-agent/venv/bin/python`。
+    /// `{hermesHome}/{hermesAgentDir}/{hermesVenvDir}/bin/python`。
     private func hermesPython(_ hermesHome: String) -> String {
-        let repoDir = (hermesHome as NSString).appendingPathComponent("hermes-agent")
-        let venvDir = (repoDir as NSString).appendingPathComponent("venv")
+        let repoDir = (hermesHome as NSString).appendingPathComponent(AppConstants.hermesAgentDir)
+        let venvDir = (repoDir as NSString).appendingPathComponent(AppConstants.hermesVenvDir)
         let binDir = (venvDir as NSString).appendingPathComponent("bin")
         return (binDir as NSString).appendingPathComponent("python")
     }
@@ -398,4 +470,14 @@ final class HermesGatewayService {
             return "error: \(error)"
         }
     }
+}
+
+// MARK: - GatewayInstance
+
+private struct GatewayInstance {
+    let process: Process
+    let port: Int
+    let apiKey: String
+    let profile: String?
+    let isReady: Bool
 }

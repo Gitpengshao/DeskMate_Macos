@@ -92,6 +92,13 @@ final class PetBehaviorManager {
         onSleepStateChanged?(false)
     }
 
+    func sleep() {
+        guard !isSleeping else { return }
+        isSleeping = true
+        walkTickCount = 0
+        onSleepStateChanged?(true)
+    }
+
     // MARK: - Mouse Drag Handling
 
     func setupMouseMonitoring() {

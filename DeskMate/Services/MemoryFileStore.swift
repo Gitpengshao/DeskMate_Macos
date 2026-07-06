@@ -13,12 +13,14 @@ import Foundation
 ///
 /// - MEMORY.md — Agent 永久记忆（位于 `~/.hermes/memories/MEMORY.md`）
 /// - USER.md   — 用户偏好（位于 `~/.hermes/memories/USER.md`）
+/// - SOUL.md   — Agent 灵魂画像（位于 `~/.hermes/SOUL.md`，单文件整体编辑）
 nonisolated final class MemoryFileStore {
 
     // MARK: - File names
 
     private let memoryFileName = "MEMORY.md"
     private let userFileName   = "USER.md"
+    private let soulFileName   = "SOUL.md"
 
     /// § 段分隔符，与 Flutter 一致。
     private let sectionSeparator = "§"
@@ -48,6 +50,28 @@ nonisolated final class MemoryFileStore {
         let parts = entries.map { $0.content }
         let formatted = formatEntries(parts)
         try formatted.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    /// 读取 SOUL.md 完整内容（单文件，不按 § 分隔）。
+    func readSoulFile() throws -> String {
+        let url = try resolveSoulFileURL()
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return ""
+        }
+        return try String(contentsOf: url, encoding: .utf8)
+    }
+
+    /// 写入 SOUL.md 完整内容。
+    func writeSoulFile(_ content: String) throws {
+        let url = try resolveSoulFileURL()
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            if FileManager.default.fileExists(atPath: url.path) {
+                try FileManager.default.removeItem(at: url)
+            }
+            return
+        }
+        try trimmed.write(to: url, atomically: true, encoding: .utf8)
     }
 
     // MARK: - Format helpers
@@ -111,5 +135,18 @@ nonisolated final class MemoryFileStore {
         }
         let fileName = (target == .memory) ? memoryFileName : userFileName
         return memDir.appendingPathComponent(fileName)
+    }
+
+    /// 解析 SOUL.md 文件 URL，确保 `.hermes` 目录存在。
+    private func resolveSoulFileURL() throws -> URL {
+        let hermesHome = AppConstants.resolveHermesHome()
+        let homeURL = URL(fileURLWithPath: hermesHome)
+        if !FileManager.default.fileExists(atPath: homeURL.path) {
+            try FileManager.default.createDirectory(
+                at: homeURL,
+                withIntermediateDirectories: true
+            )
+        }
+        return homeURL.appendingPathComponent(soulFileName)
     }
 }

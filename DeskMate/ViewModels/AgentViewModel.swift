@@ -1,26 +1,34 @@
 import Foundation
 import Combine
-import AppKit
 import SwiftUI
+import AppKit
 
-/// 多智能体页面 ViewModel — 一比一还原 Flutter `AgentViewModel`（Riverpod Notifier）。
+/// 多智能体页面 ViewModel — 简化为左侧列表 + 右侧会话。
 ///
-/// MVVM 单一状态源：所有状态通过 `model: AgentPageModel` 发布；
-/// View 通过 `@Published` 订阅更新。所有 CLI 写入均为异步，最终结果在
-/// `@MainActor` 上 commit 到 `model`。
+/// 职责：
+/// 1. 加载并缓存 Hermes profile 列表。
+/// 2. 管理左侧选中态。
+/// 3. 为每个选中的智能体启动独立 Gateway，并按 profile 缓存
+///    `AiChatViewModel` / `SessionListViewModel`，实现会话隔离与高性能切换。
+/// 4. 提供新建 / 重命名 / 编辑描述 / 删除智能体能力。
 @MainActor
 final class AgentViewModel: ObservableObject {
 
     // MARK: - Shared instance
     //
     // 跨 tab 切换时保持同一个 ViewModel 实例，
-    // 使得 `model.profiles` 的缓存能持久化。
-    // 与 `TBToast.Holder.shared` 模式一致。
+    // 使得 `model.profiles` 与 `chatContainers` 的缓存能持久化。
     static let shared = AgentViewModel()
 
     // MARK: - Published State
 
     @Published private(set) var model: AgentPageModel = AgentPageModel(isLoading: true)
+
+    /// 按 profile id 缓存的聊天容器；保证切换智能体时不丢失会话状态。
+    @Published private(set) var chatContainers: [String: AgentChatContainer] = [:]
+
+    /// 当前正在启动 Gateway / 准备聊天容器的 profile id（用于右侧展示启动中状态）。
+    @Published private(set) var preparingProfileId: String? = nil
 
     // MARK: - Dependencies
 
@@ -114,10 +122,49 @@ final class AgentViewModel: ObservableObject {
 
     // MARK: - Selection
 
-    /// 选中某个 profile — 对齐 Flutter `selectProfile`。
-    func selectProfile(_ id: String) {
+    /// 选中某个 profile 并确保其 Gateway / 聊天容器就绪。
+    func selectProfile(_ id: String) async {
         DMLogger.log("[AgentVM] selectProfile → \(id)", name: "AgentVM")
         model = model.updating(selectedProfileId: id)
+        await prepareChat(for: id)
+    }
+
+    /// 获取指定 profile 的聊天容器（若尚未创建则返回 nil）。
+    func chatContainer(for profileId: String) -> AgentChatContainer? {
+        chatContainers[profileId]
+    }
+
+    /// 确保指定 profile 的 Gateway 正在运行，并创建/复用对应的聊天容器。
+    func prepareChat(for profileId: String) async {
+        DMLogger.log("[AgentVM] prepareChat → \(profileId)", name: "AgentVM")
+
+        // 已存在容器时直接刷新状态，避免重复启动 Gateway / 重建 ViewModel。
+        if let container = chatContainers[profileId] {
+            container.sessionVM.loadSessions()
+            container.chatVM.loadCurrentModel()
+            container.chatVM.loadWorkingDirectory()
+            return
+        }
+
+        preparingProfileId = profileId
+        defer { preparingProfileId = nil }
+
+        guard let (port, apiKey) = await HermesGatewayService.shared.ensureGatewayRunning(for: profileId) else {
+            model = model.updating(
+                errorMessage: "无法启动 \(profileId.isEmpty ? "默认" : profileId) 智能体的 Gateway"
+            )
+            return
+        }
+
+        let client = GatewayClient(host: "127.0.0.1", port: port, apiKey: apiKey)
+        let chatVM = AiChatViewModel(gateway: client, profile: profileId)
+        let sessionVM = SessionListViewModel(gateway: client, profile: profileId)
+        let container = AgentChatContainer(profileId: profileId, chatVM: chatVM, sessionVM: sessionVM)
+        chatContainers[profileId] = container
+
+        container.sessionVM.loadSessions()
+        container.chatVM.loadCurrentModel()
+        container.chatVM.loadWorkingDirectory()
     }
 
     // MARK: - Search / Filter
@@ -125,11 +172,6 @@ final class AgentViewModel: ObservableObject {
     /// 设置搜索关键字。
     func setSearchQuery(_ query: String) {
         model = model.updating(searchQuery: query)
-    }
-
-    /// 切换「仅显示 distribution」。
-    func toggleDistributionFilter(_ on: Bool) {
-        model = model.updating(showOnlyDistributions: on)
     }
 
     // MARK: - Mutations
@@ -156,12 +198,12 @@ final class AgentViewModel: ObservableObject {
 
         if ok {
             model = model.updating(
-                lastOperationLog: "✓ 已创建 profile: \(name) (\(mode.title))"
+                lastOperationLog: "✓ 已创建智能体: \(name)"
             )
             await loadProfiles()
-            // 自动选中新创建的
+            // 自动选中新创建的 profile 并启动其 Gateway
             if let new = model.profiles.first(where: { $0.id == name }) {
-                model = model.updating(selectedProfileId: new.id)
+                await selectProfile(new.id)
             }
         } else {
             let detail = service.lastError?.isEmpty == false
@@ -169,7 +211,7 @@ final class AgentViewModel: ObservableObject {
                 : "创建失败，请检查 hermes CLI 是否可用"
             model = model.updating(
                 isLoading: false,
-                errorMessage: "创建 profile 失败: \(detail)"
+                errorMessage: "创建智能体失败: \(detail)"
             )
         }
     }
@@ -181,22 +223,31 @@ final class AgentViewModel: ObservableObject {
         // 默认 profile 不可删除（官方文档）
         if name == "default" {
             model = model.updating(
-                errorMessage: "默认 profile（~/.hermes）不可删除。如需完全卸载，请使用 hermes uninstall。"
+                errorMessage: "默认智能体不可删除。如需完全卸载，请使用 hermes uninstall。"
             )
             return
         }
 
         model = model.updating(isLoading: true, clearError: true)
+
+        // 先停止该 profile 的 Gateway 并释放缓存容器
+        await HermesGatewayService.shared.stopGateway(for: name)
+        chatContainers.removeValue(forKey: name)
+
         let ok = await service.deleteProfile(name: name, autoConfirm: true)
 
         if ok {
             model = model.updating(
-                lastOperationLog: "✓ 已删除 profile: \(name)"
+                lastOperationLog: "✓ 已删除智能体: \(name)"
             )
             // 重新加载并清空选中
             await loadProfiles()
             if model.selectedProfileId == name {
-                model = model.updating(selectedProfileId: model.profiles.first?.id ?? "")
+                let fallbackId = model.profiles.first?.id ?? ""
+                model = model.updating(selectedProfileId: fallbackId)
+                if !fallbackId.isEmpty {
+                    await selectProfile(fallbackId)
+                }
             }
         } else {
             let detail = service.lastError?.isEmpty == false
@@ -204,7 +255,7 @@ final class AgentViewModel: ObservableObject {
                 : "删除失败"
             model = model.updating(
                 isLoading: false,
-                errorMessage: "删除 profile 失败: \(detail)"
+                errorMessage: "删除智能体失败: \(detail)"
             )
         }
     }
@@ -216,16 +267,23 @@ final class AgentViewModel: ObservableObject {
             name: "AgentVM"
         )
         model = model.updating(isLoading: true, clearError: true)
+
+        // 重命名前停止旧 Gateway 并移除旧容器，避免端口/配置冲突
+        await HermesGatewayService.shared.stopGateway(for: oldName)
+        chatContainers.removeValue(forKey: oldName)
+
         let ok = await service.renameProfile(oldName: oldName, newName: newName)
 
         if ok {
             model = model.updating(
                 lastOperationLog: "✓ 已重命名: \(oldName) → \(newName)"
             )
-            await loadProfiles()
             if model.selectedProfileId == oldName {
                 model = model.updating(selectedProfileId: newName)
             }
+            await loadProfiles()
+            // 自动选中新名称的 profile 并启动 Gateway
+            await selectProfile(newName)
         } else {
             let detail = service.lastError?.isEmpty == false
                 ? service.lastError!
@@ -233,40 +291,6 @@ final class AgentViewModel: ObservableObject {
             model = model.updating(
                 isLoading: false,
                 errorMessage: "重命名失败: \(detail)"
-            )
-        }
-    }
-
-    /// 粘性切换 — 对齐 `hermes profile use`。
-    func useProfile(_ name: String) async {
-        DMLogger.log("[AgentVM] useProfile \(name)", name: "AgentVM")
-        model = model.updating(isLoading: true, clearError: true)
-        let ok = await service.useProfile(name: name)
-
-        if ok {
-            // 本地更新 isActive 标记
-            var updated = model.profiles.map { p -> AgentProfile in
-                var copy = p
-                copy.isActive = (p.id == name)
-                return copy
-            }
-            _ = updated
-            model = model.updating(
-                profiles: model.profiles.map { p in
-                    var copy = p
-                    copy.isActive = (p.id == name)
-                    return copy
-                },
-                lastOperationLog: "✓ 当前 profile 已切换为: \(name)"
-            )
-            await loadProfiles()
-        } else {
-            let detail = service.lastError?.isEmpty == false
-                ? service.lastError!
-                : "切换失败"
-            model = model.updating(
-                isLoading: false,
-                errorMessage: "切换失败: \(detail)"
             )
         }
     }
@@ -282,7 +306,7 @@ final class AgentViewModel: ObservableObject {
 
         if ok {
             model = model.updating(
-                lastOperationLog: "✓ 已更新 description: \(name)"
+                lastOperationLog: "✓ 已更新描述: \(name)"
             )
             await loadProfiles()
         } else {
@@ -291,173 +315,9 @@ final class AgentViewModel: ObservableObject {
                 : "更新失败"
             model = model.updating(
                 isLoading: false,
-                errorMessage: "更新 description 失败: \(detail)"
+                errorMessage: "更新描述失败: \(detail)"
             )
         }
-    }
-
-    // MARK: - Distribution
-
-    /// 安装 distribution — 对齐 `hermes profile install`。
-    func installDistribution(
-        source: String,
-        name: String?,
-        alias: Bool
-    ) async {
-        DMLogger.log(
-            "[AgentVM] installDistribution source=\(source) name=\(name ?? "") alias=\(alias)",
-            name: "AgentVM"
-        )
-        model = model.updating(isLoading: true, clearError: true)
-        let ok = await service.installDistribution(
-            source: source,
-            name: name,
-            alias: alias,
-            autoConfirm: true
-        )
-
-        if ok {
-            let aliasName = name ?? source
-            model = model.updating(
-                lastOperationLog: "✓ 已安装 distribution: \(aliasName)"
-            )
-            await loadProfiles()
-        } else {
-            let detail = service.lastError?.isEmpty == false
-                ? service.lastError!
-                : "安装失败"
-            model = model.updating(
-                isLoading: false,
-                errorMessage: "安装 distribution 失败: \(detail)"
-            )
-        }
-    }
-
-    /// 更新 distribution — 对齐 `hermes profile update`。
-    func updateDistribution(_ name: String) async {
-        DMLogger.log(
-            "[AgentVM] updateDistribution \(name)",
-            name: "AgentVM"
-        )
-        model = model.updating(isLoading: true, clearError: true)
-        let ok = await service.updateDistribution(name: name)
-
-        if ok {
-            model = model.updating(
-                lastOperationLog: "✓ 已更新 distribution: \(name)"
-            )
-            await loadProfiles()
-        } else {
-            let detail = service.lastError?.isEmpty == false
-                ? service.lastError!
-                : "更新失败"
-            model = model.updating(
-                isLoading: false,
-                errorMessage: "更新 distribution 失败: \(detail)"
-            )
-        }
-    }
-
-    // MARK: - Gateway per-profile
-
-    /// 启动某 profile 的 gateway。
-    func startGateway(for profileId: String) async {
-        DMLogger.log(
-            "[AgentVM] startGateway \(profileId)",
-            name: "AgentVM"
-        )
-        let ok = await service.startGateway(profile: profileId)
-        if ok {
-            model = model.updating(
-                lastOperationLog: "✓ Gateway 已启动: \(profileId)"
-            )
-            await loadProfiles()
-        } else {
-            let detail = service.lastError?.isEmpty == false
-                ? service.lastError!
-                : "启动失败"
-            model = model.updating(errorMessage: "Gateway 启动失败: \(detail)")
-        }
-    }
-
-    /// 停止某 profile 的 gateway。
-    func stopGateway(for profileId: String) async {
-        DMLogger.log(
-            "[AgentVM] stopGateway \(profileId)",
-            name: "AgentVM"
-        )
-        let ok = await service.stopGateway(profile: profileId)
-        if ok {
-            model = model.updating(
-                lastOperationLog: "✓ Gateway 已停止: \(profileId)"
-            )
-            await loadProfiles()
-        } else {
-            let detail = service.lastError?.isEmpty == false
-                ? service.lastError!
-                : "停止失败"
-            model = model.updating(errorMessage: "Gateway 停止失败: \(detail)")
-        }
-    }
-
-    /// 安装为系统服务。
-    func installGatewayService(for profileId: String) async {
-        DMLogger.log(
-            "[AgentVM] installGatewayService \(profileId)",
-            name: "AgentVM"
-        )
-        let ok = await service.installGatewayService(profile: profileId)
-        if ok {
-            model = model.updating(
-                lastOperationLog: "✓ Gateway 服务已安装: \(profileId)"
-            )
-        } else {
-            let detail = service.lastError?.isEmpty == false
-                ? service.lastError!
-                : "安装服务失败"
-            model = model.updating(errorMessage: "Gateway 服务安装失败: \(detail)")
-        }
-    }
-
-    // MARK: - Export / Import
-
-    /// 导出 profile — 对齐 `hermes profile export`。
-    func exportProfile(_ name: String) async {
-        DMLogger.log("[AgentVM] exportProfile \(name)", name: "AgentVM")
-        model = model.updating(isLoading: true, clearError: true)
-        if let tarball = await service.exportProfile(name: name) {
-            // 在 Finder 中显示导出文件
-            NSWorkspace.shared.activateFileViewerSelecting(
-                [URL(fileURLWithPath: tarball)]
-            )
-            model = model.updating(
-                isLoading: false,
-                lastOperationLog: "✓ 已导出到: \(tarball)"
-            )
-        } else {
-            model = model.updating(
-                isLoading: false,
-                errorMessage: "导出失败"
-            )
-        }
-    }
-
-    // MARK: - 文档跳转
-
-    /// 打开官方 profiles 文档。
-    func openProfilesDocs() {
-        guard let url = URL(
-            string: "https://hermes-agent.nousresearch.com/docs/zh-Hans/user-guide/profiles"
-        ) else { return }
-        NSWorkspace.shared.open(url)
-    }
-
-    /// 打开官方 distribution 文档。
-    func openDistributionsDocs() {
-        guard let url = URL(
-            string: "https://hermes-agent.nousresearch.com/docs/zh-Hans/user-guide/profile-distributions"
-        ) else { return }
-        NSWorkspace.shared.open(url)
     }
 
     // MARK: - 错误清理

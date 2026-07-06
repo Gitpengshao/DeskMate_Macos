@@ -19,12 +19,15 @@ struct InputBar: View {
     let reasoningEffort: ReasoningEffort
     let workingDirectory: String?
     let currentProfile: String?
+    let isRecording: Bool
+    let voiceError: String?
     let onSend: () -> Void
     let onInputChange: (String) -> Void
     let onReasoningEffortChange: (ReasoningEffort) -> Void
     let onWorkingDirectoryChange: (String?) -> Void
     let onStop: () -> Void
     let onRemoveReference: (String) -> Void
+    let onToggleVoiceRecording: () -> Void
     /// 是否显示工作区文件选择弹窗（由父视图 AiChatPage 控制）。
     @Binding var showFilePicker: Bool
 
@@ -53,6 +56,10 @@ struct InputBar: View {
             // 引用文件/目录 chips
             if !selectedReferences.isEmpty {
                 referenceChipsArea
+            }
+            // 语音错误提示
+            if let voiceError = voiceError, !voiceError.isEmpty {
+                voiceErrorBanner(voiceError)
             }
             // 中部：富文本输入框
             inputArea
@@ -155,6 +162,49 @@ struct InputBar: View {
         .fixedSize()
     }
 
+    // MARK: - Voice error banner
+
+    private func voiceErrorBanner(_ message: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 11))
+                .foregroundColor(Palette.textPrimary)
+            Text(message)
+                .font(.system(size: 11))
+                .foregroundColor(Palette.textPrimary)
+                .lineLimit(2)
+            Spacer()
+            if message.contains("听写") || message.contains("键盘") {
+                Button(action: openDictationSettings) {
+                    Text("打开设置")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(Palette.inverseInk)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(
+                            RoundedRectangle(cornerRadius: 5)
+                                .fill(Palette.inverse)
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Palette.bgBase)
+        .overlay(
+            Rectangle()
+                .fill(Palette.border)
+                .frame(height: 1),
+            alignment: .bottom
+        )
+    }
+
+    private func openDictationSettings() {
+        let url = URL(string: "x-apple.systempreferences:com.apple.preference.keyboard")!
+        NSWorkspace.shared.open(url)
+    }
+
     // MARK: - Reference chips
 
     /// 选中的文件/目录 chip 列表。
@@ -236,9 +286,9 @@ struct InputBar: View {
             //    10pt SwiftUI padding + 4pt textContainerInset = 14，
             //    6pt SwiftUI padding + 6pt textContainerInset = 12）。
             if text.isEmpty {
-                Text(hintText)
+                Text(isRecording ? "正在听您说话…" : hintText)
                     .font(.system(size: 14))
-                    .foregroundColor(Palette.textTertiary)
+                    .foregroundColor(isRecording ? Palette.recording : Palette.textTertiary)
                     .padding(.leading, 14)
                     .padding(.top, 12)
                     .allowsHitTesting(false)
@@ -248,6 +298,7 @@ struct InputBar: View {
             RichTextEditor(
                 text: $text,
                 isFocused: $isFocused,
+                isEditable: !isRecording,
                 onChange: onInputChange,
                 onSubmit: send,
                 minHeight: minContentHeight,
@@ -343,8 +394,10 @@ struct InputBar: View {
 
             Spacer()
 
-            // 麦克风 + 图片按钮（占位，与原有行为一致）
-            iconButton(systemName: "mic")
+            // 语音输入按钮
+            voiceButton
+
+            // 图片按钮（占位，与原有行为一致）
             iconButton(systemName: "photo")
 
             // 发送按钮
@@ -452,6 +505,27 @@ struct InputBar: View {
         .opacity((!isStreaming && text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && selectedReferences.isEmpty) ? 0.4 : 1.0)
     }
 
+    private var voiceButton: some View {
+        Button(action: onToggleVoiceRecording) {
+            Image(systemName: isRecording ? "stop.fill" : "mic")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(isRecording ? Palette.inverseInk : Palette.textSecond)
+                .frame(width: 32, height: 32)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(isRecording ? Palette.recording : Palette.bgPanel)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Palette.border, lineWidth: 1)
+                        )
+                )
+        }
+        .buttonStyle(.plain)
+        .disabled(isStreaming)
+        .opacity(isStreaming ? 0.4 : 1.0)
+        .help(isRecording ? "点击结束录音" : "点击开始语音输入")
+    }
+
     private func iconButton(systemName: String) -> some View {
         Button(action: {}) {
             Image(systemName: systemName)
@@ -485,8 +559,8 @@ struct InputBar: View {
 
     private var hintText: String {
         switch petNameKey {
-        case "petNameHuahua": return "和花花对话… (⌘↩ 发送 · ⇧↩ 换行)"
-        default: return "输入消息… (⌘↩ 发送 · ⇧↩ 换行)"
+        case "petNameHuahua": return "和花花对话… (↩ 发送 · ⇧↩ 换行)"
+        default: return "输入消息… (↩ 发送 · ⇧↩ 换行)"
         }
     }
 }
@@ -502,6 +576,7 @@ struct InputBar: View {
 struct RichTextEditor: NSViewRepresentable {
     @Binding var text: String
     var isFocused: FocusState<Bool>.Binding
+    var isEditable: Bool = true
     let onChange: (String) -> Void
     let onSubmit: () -> Void
     let minHeight: CGFloat
@@ -531,6 +606,11 @@ struct RichTextEditor: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {
         guard let textView = nsView.documentView as? NSTextView else { return }
+
+        // 同步可编辑状态（语音输入时禁用键盘输入）
+        if textView.isEditable != isEditable {
+            textView.isEditable = isEditable
+        }
 
         let oldString = textView.string
         let textChanged = oldString != text
@@ -582,7 +662,7 @@ struct RichTextEditor: NSViewRepresentable {
 
         func configure(textView: NSTextView) {
             textView.delegate = self
-            textView.isEditable = true
+            textView.isEditable = parent.isEditable
             textView.isSelectable = true
             textView.isRichText = true
             textView.allowsUndo = true
@@ -709,14 +789,15 @@ struct RichTextEditor: NSViewRepresentable {
             _ textView: NSTextView,
             doCommandBy selector: Selector
         ) -> Bool {
-            // ⌘↩ = 发送
             if selector == #selector(NSResponder.insertNewline(_:)) {
                 let event = NSApp.currentEvent
-                if let mods = event?.modifierFlags,
-                   mods.contains(.command) {
-                    parent.onSubmit()
-                    return true
+                let mods = event?.modifierFlags ?? []
+                // ⇧↩ 换行，↩ / ⌘↩ 发送
+                if mods.contains(.shift) {
+                    return false
                 }
+                parent.onSubmit()
+                return true
             }
             return false
         }
@@ -735,4 +816,5 @@ private enum Palette {
     static let textTertiary = Color(red: 0.420, green: 0.420, blue: 0.420)
     static let inverse     = Color(red: 1.000, green: 1.000, blue: 1.000)
     static let inverseInk  = Color(red: 0.000, green: 0.000, blue: 0.000)
+    static let recording   = Color(red: 0.920, green: 0.250, blue: 0.250)
 }

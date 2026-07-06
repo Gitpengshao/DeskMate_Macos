@@ -247,49 +247,6 @@ enum AgentCreateMode: String, CaseIterable, Identifiable {
     }
 }
 
-// MARK: - Distribution Source
-
-/// Distribution 安装源 — 对齐官方 `hermes profile install` 接受的 git URL 形式。
-enum DistributionSourceType: String, CaseIterable, Identifiable {
-    case github       // github.com/owner/repo
-    case https        // https://...
-    case ssh          // git@...
-    case local        // ~/path/...
-    case gitlab       // gitlab.com/...
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .github: return "GitHub 简写"
-        case .https:  return "完整 HTTPS"
-        case .ssh:    return "SSH"
-        case .local:  return "本地目录"
-        case .gitlab: return "GitLab / 自建"
-        }
-    }
-
-    var placeholder: String {
-        switch self {
-        case .github: return "github.com/owner/research-bot"
-        case .https:  return "https://github.com/owner/repo.git"
-        case .ssh:    return "git@github.com:owner/repo.git"
-        case .local:  return "~/my-profile-in-progress/"
-        case .gitlab: return "https://git.example.com/team/agent.git"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .github: return "link"
-        case .https:  return "globe"
-        case .ssh:    return "key.fill"
-        case .local:  return "folder"
-        case .gitlab: return "server.rack"
-        }
-    }
-}
-
 // MARK: - Page State Model
 
 /// 多智能体页面单一状态源 — 对齐 Flutter `AgentPageModel`。
@@ -316,8 +273,6 @@ struct AgentPageModel: Equatable {
     // MARK: - 过滤
 
     var searchQuery: String
-    /// `true` 仅显示 distribution。
-    var showOnlyDistributions: Bool
 
     // MARK: - Init
 
@@ -328,8 +283,7 @@ struct AgentPageModel: Equatable {
         isBackgroundRefreshing: Bool = false,
         errorMessage: String = "",
         lastOperationLog: String = "",
-        searchQuery: String = "",
-        showOnlyDistributions: Bool = false
+        searchQuery: String = ""
     ) {
         self.profiles = profiles
         self.selectedProfileId = selectedProfileId
@@ -338,7 +292,6 @@ struct AgentPageModel: Equatable {
         self.errorMessage = errorMessage
         self.lastOperationLog = lastOperationLog
         self.searchQuery = searchQuery
-        self.showOnlyDistributions = showOnlyDistributions
     }
 
     // MARK: - Derived
@@ -346,12 +299,9 @@ struct AgentPageModel: Equatable {
     /// 是否有可用缓存（用于决定「立即展示」还是「显示 loading」）。
     var hasCache: Bool { !profiles.isEmpty }
 
-    /// 过滤后的 profile 列表（按 searchQuery + showOnlyDistributions）。
+    /// 过滤后的 profile 列表（按 searchQuery）。
     var filteredProfiles: [AgentProfile] {
         var result = profiles
-        if showOnlyDistributions {
-            result = result.filter { $0.isDistribution }
-        }
         let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
         if !q.isEmpty {
             result = result.filter {
@@ -375,14 +325,6 @@ struct AgentPageModel: Equatable {
         profiles.first(where: { $0.isActive })
     }
 
-    /// 统计：distribution 数量。
-    var distributionCount: Int { profiles.filter { $0.isDistribution }.count }
-
-    /// 统计：运行中的 gateway 数量。
-    var runningGatewayCount: Int {
-        profiles.filter { $0.gatewayStatus == .running }.count
-    }
-
     /// 总 profile 数。
     var totalCount: Int { profiles.count }
 
@@ -397,8 +339,7 @@ struct AgentPageModel: Equatable {
         errorMessage: String? = nil,
         lastOperationLog: String? = nil,
         clearError: Bool = false,
-        searchQuery: String? = nil,
-        showOnlyDistributions: Bool? = nil
+        searchQuery: String? = nil
     ) -> AgentPageModel {
         var m = self
         if let profiles = profiles { m.profiles = profiles }
@@ -415,9 +356,6 @@ struct AgentPageModel: Equatable {
             m.lastOperationLog = lastOperationLog
         }
         if let searchQuery = searchQuery { m.searchQuery = searchQuery }
-        if let showOnlyDistributions = showOnlyDistributions {
-            m.showOnlyDistributions = showOnlyDistributions
-        }
         return m
     }
 }

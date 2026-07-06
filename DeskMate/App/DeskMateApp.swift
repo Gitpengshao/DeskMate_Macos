@@ -5,31 +5,14 @@ import AppKit
 struct DeskMateApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
-    /// 从启动参数 `--show-webview <URL>` 中提取 WebView 模式的目标 URL。
-    private static let launchWebViewURL: String? = {
-        let args = CommandLine.arguments
-        guard let idx = args.firstIndex(of: "--show-webview"),
-              idx + 1 < args.count else { return nil }
-        let value = args[idx + 1].trimmingCharacters(in: .whitespacesAndNewlines)
-        return value.isEmpty ? nil : value
-    }()
-
     var body: some Scene {
         // WindowGroup 仅作为占位 — 宠物窗口由 PetWindowController 独立管理，
         // 主控制台/Onboarding 由 AppDelegate 以独立 NSWindow 管理。
-        // WebView 模式启动时展示 WebView 窗口。
         WindowGroup {
-            if Self.launchWebViewURL == nil {
-                // 正常模式：极小的隐藏窗口，宠物和主控制台由 AppDelegate 管理
-                Color.clear
-                    .frame(width: 1, height: 1)
-                    .allowsHitTesting(false)
-            } else {
-                MMWebViewWindow(urlString: Self.launchWebViewURL ?? "") {
-                    NSApp.terminate(nil)
-                }
-                .frame(minWidth: 800, minHeight: 500)
-            }
+            // 正常模式：极小的隐藏窗口，宠物和主控制台由 AppDelegate 管理
+            Color.clear
+                .frame(width: 1, height: 1)
+                .allowsHitTesting(false)
         }
     }
 }
@@ -49,21 +32,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var preloadedHostingController: NSHostingController<MainPage>?
     private var gatewayStarted: Bool = false
 
-    /// WebView 模式的目标 URL
-    let webViewURL: String? = {
-        let args = CommandLine.arguments
-        guard let idx = args.firstIndex(of: "--show-webview"),
-              idx + 1 < args.count else { return nil }
-        let value = args[idx + 1].trimmingCharacters(in: .whitespacesAndNewlines)
-        return value.isEmpty ? nil : value
-    }()
-
-    var isWebViewMode: Bool { webViewURL != nil }
-
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSLog("[AppDelegate] applicationDidFinishLaunching: 启动 (webViewMode=\(isWebViewMode))")
-
-        if isWebViewMode { return }
+        NSLog("[AppDelegate] applicationDidFinishLaunching: 启动")
 
         // 隐藏 Dock 图标，仅通过灵动岛和桌宠交互
         NSApplication.shared.setActivationPolicy(.accessory)
@@ -339,7 +309,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        isWebViewMode
+        false
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        NSLog("[AppDelegate] applicationShouldTerminate: 准备停止所有 Gateway")
+        Task.detached {
+            await HermesGatewayService.shared.stopAllGateways()
+            await MainActor.run {
+                NSApp.reply(toApplicationShouldTerminate: true)
+            }
+        }
+        return .terminateLater
     }
 }
 

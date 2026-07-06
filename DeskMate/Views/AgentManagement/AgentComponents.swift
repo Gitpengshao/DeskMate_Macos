@@ -67,11 +67,14 @@ struct StatusPill: View {
 
 // MARK: - Profile List Row
 
-/// 左侧 profile 列表行 — 对齐 Flutter `_ProfileListTile`。
+/// 左侧智能体列表行 — 简化为头像 + 名称 + 描述/模型，悬停显示编辑/重命名/删除。
 struct AgentProfileRow: View {
     let profile: AgentProfile
     let isSelected: Bool
     var onTap: () -> Void
+    var onDescribe: (() -> Void)?
+    var onRename: (() -> Void)?
+    var onDelete: (() -> Void)?
 
     @State private var isHovered: Bool = false
 
@@ -105,31 +108,35 @@ struct AgentProfileRow: View {
                         }
                     }
 
-                    HStack(spacing: 6) {
-                        // Gateway dot
-                        Circle()
-                            .fill(profile.gatewayStatus.dotColor)
-                            .frame(width: 6, height: 6)
-                        Text(gatewayLabel)
-                            .font(.system(size: 10.5))
+                    if !profile.description.isEmpty {
+                        Text(profile.description)
+                            .font(.system(size: 11))
                             .foregroundColor(AgentPalette.textMuted)
-                        if !profile.model.isEmpty {
-                            Text("·")
-                                .foregroundColor(AgentPalette.textMuted)
-                            Text(profile.model)
-                                .font(.system(size: 10.5, design: .monospaced))
-                                .foregroundColor(AgentPalette.textMuted)
-                                .lineLimit(1)
-                        }
+                            .lineLimit(1)
+                    } else if !profile.model.isEmpty {
+                        Text(profile.model)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(AgentPalette.textMuted)
+                            .lineLimit(1)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                // distribution 标签
-                if profile.isDistribution {
-                    Image(systemName: "shippingbox.fill")
-                        .font(.system(size: 10))
-                        .foregroundColor(AgentPalette.statusDistribution)
+                if isHovered {
+                    HStack(spacing: 2) {
+                        if let onDescribe = onDescribe {
+                            rowActionButton(icon: "text.bubble", action: onDescribe)
+                        }
+                        if !profile.isDefault {
+                            if let onRename = onRename {
+                                rowActionButton(icon: "pencil", action: onRename)
+                            }
+                            if let onDelete = onDelete {
+                                rowActionButton(icon: "trash", action: onDelete)
+                            }
+                        }
+                    }
+                    .transition(.opacity.animation(.easeInOut(duration: 0.15)))
                 }
             }
             .padding(.horizontal, 10)
@@ -164,18 +171,21 @@ struct AgentProfileRow: View {
         return .clear
     }
 
-    private var gatewayLabel: String {
-        switch profile.gatewayStatus {
-        case .running: return "Gateway 运行中"
-        case .stopped: return "Gateway 已停止"
-        case .unknown: return "Gateway 未知"
+    private func rowActionButton(icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(AgentPalette.textMuted)
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
     }
 }
 
 // MARK: - Side Panel Filter
 
-/// 左侧筛选段：搜索框 + 计数 + 过滤 chip。
+/// 左侧筛选段：搜索框 + 计数。
 struct AgentSideFilter: View {
     @ObservedObject var viewModel: AgentViewModel
 
@@ -205,43 +215,12 @@ struct AgentSideFilter: View {
                     .stroke(AgentPalette.border, lineWidth: 0.5)
             )
 
-            // 计数 chips
-            HStack(spacing: 6) {
-                StatusPill(
-                    text: String(format: AgentText.totalCount, viewModel.model.totalCount),
-                    color: AgentPalette.textPrimary,
-                    icon: "rectangle.stack.fill"
-                )
-                if viewModel.model.distributionCount > 0 {
-                    StatusPill(
-                        text: String(
-                            format: AgentText.distributionCount,
-                            viewModel.model.distributionCount
-                        ),
-                        color: AgentPalette.statusDistribution,
-                        icon: "shippingbox.fill"
-                    )
-                }
-            }
-
-            // Filter chip: 仅显示 distribution
-            HStack(spacing: 6) {
-                Toggle(isOn: Binding(
-                    get: { viewModel.model.showOnlyDistributions },
-                    set: { viewModel.toggleDistributionFilter($0) }
-                )) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "shippingbox")
-                            .font(.system(size: 10))
-                        Text("仅 distribution")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .foregroundColor(AgentPalette.textPrimary)
-                }
-                .toggleStyle(SwitchToggleStyle(tint: AgentPalette.inverse))
-                .scaleEffect(0.8)
-                Spacer()
-            }
+            // 计数 chip
+            StatusPill(
+                text: String(format: AgentText.totalCount, viewModel.model.totalCount),
+                color: AgentPalette.textPrimary,
+                icon: "rectangle.stack.fill"
+            )
         }
         .padding(.horizontal, 12)
         .padding(.top, 12)
@@ -251,11 +230,10 @@ struct AgentSideFilter: View {
 
 // MARK: - Toolbar
 
-/// 顶部工具栏：刷新 / 新建 profile / 安装 distribution / 文档。
+/// 顶部工具栏：刷新 / 新建智能体。
 struct AgentToolbar: View {
     @ObservedObject var viewModel: AgentViewModel
     var onNewProfile: () -> Void
-    var onInstallDistribution: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
@@ -266,23 +244,9 @@ struct AgentToolbar: View {
                 action: { Task { await viewModel.refresh() } }
             )
 
-            // 文档
-            ToolbarGhostButton(
-                title: AgentText.docs,
-                systemImage: "book",
-                action: { viewModel.openProfilesDocs() }
-            )
-
             Spacer()
 
-            // 安装 distribution
-            ToolbarGhostButton(
-                title: AgentText.installDistribution,
-                systemImage: "arrow.down.circle",
-                action: onInstallDistribution
-            )
-
-            // 新建 profile
+            // 新建智能体
             ToolbarPrimaryButton(
                 title: AgentText.newProfile,
                 systemImage: "plus",
@@ -562,7 +526,6 @@ struct AgentLoadingView: View {
 /// 空状态。
 struct AgentEmptyView: View {
     var onNewProfile: () -> Void
-    var onInstallDistribution: () -> Void
 
     var body: some View {
         VStack(spacing: 16) {
@@ -582,18 +545,11 @@ struct AgentEmptyView: View {
                 .foregroundColor(AgentPalette.textMuted)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 360)
-            HStack(spacing: 8) {
-                ToolbarPrimaryButton(
-                    title: AgentText.newProfile,
-                    systemImage: "plus",
-                    action: onNewProfile
-                )
-                ToolbarGhostButton(
-                    title: AgentText.installDistribution,
-                    systemImage: "arrow.down.circle",
-                    action: onInstallDistribution
-                )
-            }
+            ToolbarPrimaryButton(
+                title: AgentText.newProfile,
+                systemImage: "plus",
+                action: onNewProfile
+            )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(40)

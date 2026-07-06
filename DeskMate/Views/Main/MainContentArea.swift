@@ -8,6 +8,12 @@ struct MainContentArea: View {
 
     @ObservedObject private var connection = GatewayConnectionManager.shared
 
+    // 缓存 AI 对话页的状态，切换侧边栏导航时不会销毁其 ViewModel，
+    // 从而保证 SSE 流等后台任务在 tab 切换后仍然继续进行。
+    @StateObject private var aiChatViewModel = AiChatViewModel()
+    @StateObject private var sessionListViewModel = SessionListViewModel()
+    @StateObject private var settingsManager = SettingsManager.shared
+
     var body: some View {
         VStack(spacing: 0) {
             headerBar
@@ -71,14 +77,14 @@ struct MainContentArea: View {
         Group {
             switch activeNavId {
             case "ai-chat":
-                AiChatPage(isDark: isDark)
+                AiChatPage(chatVM: aiChatViewModel, sessionVM: sessionListViewModel, isDark: isDark)
             case "agent":             AgentPage()
             case "memory-management": MemoryManagementPage()
             case "task-board":        TaskBoardPage()
             case "model-config":      ModelConfigPage()
             case "skill-management":  SkillManagementPage()
             case "gateway-config":    GatewayConfigPage()
-            case "settings":          placeholderPage(title: "设置", icon: "gearshape")
+            case "settings":          SettingsPage()
             default:                  placeholderPage(title: viewModel.itemLabel(activeNavId), icon: "square.grid.2x2")
             }
         }

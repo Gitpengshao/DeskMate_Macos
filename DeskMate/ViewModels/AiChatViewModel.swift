@@ -18,14 +18,15 @@ final class AiChatViewModel: ObservableObject {
     /// 读取 `~/.hermes/config.yaml` 中默认模型 — 驱动 header 徽标显示。
     private let modelConfigService: ModelConfigService
 
+    /// 当前 ViewModel 对应的 Hermes profile；nil 表示默认 profile。
+    let profile: String?
+
     /// 读取 / 写入配置 — 始终与当前 Gateway 运行的 profile 对齐。
     ///
     /// 官方文档明确区分 profile 与 workspace：
     /// `terminal.cwd` 必须写入 Gateway 实际使用的 profile 的 `config.yaml`，
     /// 否则工作区不会生效（文件会创建到默认 `~/.hermes` 或其他目录）。
-    private var configWriter: HermesConfigWriter {
-        HermesConfigWriter.forProfile(HermesGatewayService.shared.currentProfile)
-    }
+    private let configWriter: HermesConfigWriter
 
     /// SSE 流缓冲（与 Flutter `_streamBuffer` 等价）。
     private var streamBuffer: String = ""
@@ -33,33 +34,68 @@ final class AiChatViewModel: ObservableObject {
     /// 灵动岛工作态是否已触发 — 首个 deltaChunk 时设为 true，结束后复位
     private var hasStartedWorking: Bool = false
 
+    /// 本地语音识别管理器。
+    private let speechManager = SpeechRecognitionManager.shared
+
     init(
         gateway: GatewayClient? = nil,
         modelConfigService: ModelConfigService? = nil,
         configWriter: HermesConfigWriter? = nil,
+        profile: String? = nil,
         petEmoji: String = "🐱",
         petNameKey: String = "petNameHuahua"
     ) {
         // 在 @MainActor 隔离的 init 体内构造默认值，
         // 避免在默认参数（nonisolated 上下文）中调用 main actor-isolated 初始化器。
         // 使用 GatewayClient.shared 以便 HermesGatewayService 启动后注入的 apiKey 生效。
+        self.profile = profile
         let resolvedGateway = gateway ?? GatewayClient.shared
         self.gateway = resolvedGateway
         self.chatService = ChatService(gatewayClient: resolvedGateway)
-        self.modelConfigService = modelConfigService ?? ModelConfigService()
+        self.modelConfigService = modelConfigService ?? ModelConfigService(hermesHome: AppConstants.resolveHermesHome(for: profile))
         // 初始读取使用当前 profile（通常是 nil，即默认 `~/.hermes`）；
         // 页面 onAppear 会再次刷新，确保 Gateway 启动后拿到最新值。
-        let initialWriter = configWriter ?? HermesConfigWriter.forProfile(HermesGatewayService.shared.currentProfile)
+        let writer = configWriter ?? HermesConfigWriter.forProfile(profile)
+        self.configWriter = writer
         // 从 config.yaml 同步当前推理强度（保持与官方默认值兼容）。
-        let loaded = initialWriter.readReasoningEffort()
+        let loaded = writer.readReasoningEffort()
         // 从 config.yaml 同步当前工作区目录。
-        let cwd = initialWriter.readTerminalCwd()
+        let cwd = writer.readTerminalCwd()
         self.model = AiChatModel(
             petEmoji: petEmoji,
             petNameKey: petNameKey,
             reasoningEffort: loaded,
             workingDirectory: cwd
         )
+
+        setupSpeechRecognition()
+    }
+
+    /// 绑定本地语音识别回调。
+    private func setupSpeechRecognition() {
+        speechManager.onTranscription = { [weak self] text, isFinal in
+            guard let self = self else { return }
+            self.model.voiceTranscribedText = text
+            self.model.inputText = text
+            self.model.voiceError = nil
+
+            if isFinal {
+                self.model.isRecording = false
+                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    self.sendMessage()
+                }
+            } else {
+                self.model.isRecording = true
+            }
+        }
+
+        speechManager.onError = { [weak self] message in
+            guard let self = self else { return }
+            self.model.isRecording = false
+            self.model.voiceError = message
+            DMLogger.log("Speech recognition error: \(message)", name: "AiChatVM")
+        }
     }
 
     // MARK: - Input
@@ -93,6 +129,28 @@ final class AiChatViewModel: ObservableObject {
     /// 清空全部引用。
     func clearReferences() {
         model.selectedReferences = []
+    }
+
+    // MARK: - Voice input
+
+    /// 切换麦克风录音状态；识别完成后会自动调用 `sendMessage` 发送文本。
+    func toggleVoiceRecording() {
+        guard !model.isStreaming else { return }
+
+        if model.isRecording {
+            speechManager.stopRecording()
+        } else {
+            model.voiceError = nil
+            model.voiceTranscribedText = ""
+            speechManager.startRecording()
+        }
+    }
+
+    /// 取消当前录音并清空临时文本。
+    func cancelVoiceRecording() {
+        speechManager.cancelRecording()
+        model.isRecording = false
+        model.voiceTranscribedText = ""
     }
 
     // MARK: - Send
@@ -297,6 +355,9 @@ final class AiChatViewModel: ObservableObject {
             hasStartedWorking = false
             DynamicNotchManager.shared.stopWorking()
         }
+
+        // 后台刷新今日汇总，供控制台打开时灵动岛展示
+        DynamicNotchManager.shared.refreshTodayStats()
 
         DMLogger.log(
             "[DEBUG] _onStreamDone: state updated, " +

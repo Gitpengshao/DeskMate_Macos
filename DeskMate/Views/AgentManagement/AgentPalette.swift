@@ -54,75 +54,37 @@ enum AgentText {
 
     // ---- Toolbar ----
     static let newProfile      = "新建 profile"
-    static let installDistribution = "安装 distribution"
     static let refresh         = "刷新"
-    static let docs            = "查看官方文档"
 
     // ---- Side Panel (left) ----
-    static let allProfiles     = "全部 profile"
-    static let distributions   = "distribution"
     static let search          = "搜索 profile"
     static let totalCount      = "共 %d 个"
-    static let distributionCount = "%d 个 distribution"
-    static let runningGatewayCount = "%d 个 gateway 运行中"
-
-    // ---- Detail Panel (right) ----
-    static let sectionBasic    = "基本信息"
-    static let sectionRuntime  = "运行时"
-    static let sectionDistribution = "Distribution"
-    static let sectionGateway  = "Gateway"
-    static let sectionDanger   = "危险操作"
 
     static let fieldId         = "ID"
     static let fieldName       = "名称"
-    static let fieldAlias      = "命令别名"
-    static let fieldPath       = "路径"
     static let fieldModel      = "模型"
     static let fieldProvider   = "Provider"
     static let fieldDescription = "描述"
-    static let fieldSkills     = "技能数"
-    static let fieldCron       = "Cron 任务"
-    static let fieldInstalledAt = "安装时间"
-    static let fieldStatus     = "状态"
-    static let fieldDistName   = "包名"
-    static let fieldDistVersion = "版本"
-    static let fieldDistSource = "安装源"
-    static let fieldDistAuthor = "作者"
-    static let fieldDistLicense = "License"
-    static let fieldGatewayStatus = "Gateway 状态"
+    static let fieldProfileName = "profile 名"
+    static let fieldCloneFrom  = "源 profile"
+    static let fieldDescriptionHint = "描述（Kanban 编排器根据此描述路由任务，可选）"
 
     // ---- Buttons ----
-    static let startGateway    = "启动 Gateway"
-    static let stopGateway     = "停止 Gateway"
-    static let installService  = "安装为服务"
-    static let updateDistribution = "更新 Distribution"
-    static let exportProfile   = "导出"
     static let renameProfile   = "重命名"
     static let deleteProfile   = "删除"
-    static let useAsActive     = "设为当前"
     static let editDescription = "编辑描述"
     static let save            = "保存"
     static let cancel          = "取消"
     static let confirm         = "确认"
     static let create          = "创建"
-    static let install         = "安装"
     static let close           = "关闭"
     static let openInFinder    = "在 Finder 中显示"
 
     // ---- Dialogs ----
     static let newProfileTitle = "新建 profile"
     static let cloneProfileTitle = "克隆 profile"
-    static let installDistTitle = "从 Git 仓库安装"
     static let renameTitle     = "重命名 profile"
     static let deleteTitle     = "删除 profile"
-
-    static let fieldProfileName = "profile 名"
-    static let fieldCloneFrom  = "源 profile"
-    static let fieldDescriptionHint = "描述（Kanban 编排器根据此描述路由任务，可选）"
-    static let fieldGitSource  = "Git 仓库 URL"
-    static let fieldLocalName   = "本地名称（可选）"
-    static let fieldCreateAlias = "创建命令别名（<name> chat / setup / gateway start）"
-    static let fieldAutoConfirm = "跳过确认提示"
 
     // ---- Helpers ----
     static func notEmpty(_ s: String, fallback: String) -> String {
@@ -131,12 +93,11 @@ enum AgentText {
 
     // ---- Empty / Errors ----
     static let emptyTitle      = "还没有 profile"
-    static let emptyHint       = "点击「新建 profile」创建一个，或「安装 distribution」从 Git 仓库拉一个完整 agent"
+    static let emptyHint       = "点击「新建 profile」创建你的第一个智能体"
     static let loadingTitle    = "加载 profile 中..."
     static let defaultProfileHint = "默认 profile 不可删除"
 
     // ---- Empty / Validation ----
     static let invalidName     = "profile 名必须为小写字母数字 + 连字符 / 下划线，且以字母数字开头"
-    static let noSource        = "请填写 Git 仓库 URL"
     static let noCloneFrom     = "克隆模式需要指定源 profile"
 }

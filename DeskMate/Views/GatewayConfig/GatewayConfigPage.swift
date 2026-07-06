@@ -1,19 +1,10 @@
 import SwiftUI
 
-/// 消息网关配置页 — 把 `hermes gateway setup` / `hermes gateway` / 编辑 `.env` 等
-/// 终端命令全部映射为可视化操作。
+/// 消息网关配置页 — 极简连接入口。
 ///
-/// 布局：
-/// 1. 页面头部 — 标题 + 网关状态徽章
-/// 2. 网关状态卡 — 状态/端口 + 启动/停止按钮
-/// 3. TabView — 飞书/Lark、微信 两个配置表单
-///
-/// 官方文档：
-/// - 飞书/Lark: https://hermes-agent.nousresearch.com/docs/zh-Hans/user-guide/messaging/feishu
-/// - 微信:     https://hermes-agent.nousresearch.com/docs/zh-Hans/user-guide/messaging/weixin
+/// 只保留：状态、启动/停止、扫码配置、终端兜底。
 struct GatewayConfigPage: View {
     @StateObject private var viewModel = GatewayConfigViewModel()
-    @State private var selectedTab: Int = 0
 
     var body: some View {
         ZStack {
@@ -27,7 +18,6 @@ struct GatewayConfigPage: View {
         }
         .preferredColorScheme(.dark)
         .task {
-            viewModel.loadAll()
             GatewayConnectionManager.shared.startMonitoring()
         }
         .onDisappear {
@@ -50,23 +40,17 @@ struct GatewayConfigPage: View {
 
     private var pageHeader: some View {
         HStack(alignment: .center, spacing: 14) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Image(systemName: "antenna.radiowaves.left.and.right")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(GCPalette.textPrimary)
-                    Text("消息网关配置")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(GCPalette.textPrimary)
-                }
-                Text("把 Hermes 终端命令变成可视化操作 — 配置微信、飞书 / Lark 连接")
-                    .font(.system(size: 12))
-                    .foregroundColor(GCPalette.textSecond)
+            HStack(spacing: 8) {
+                Image(systemName: "antenna.radiowaves.left.and.right")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(GCPalette.textPrimary)
+                Text("消息网关")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(GCPalette.textPrimary)
             }
 
             Spacer()
 
-            // 网关状态徽章
             HStack(spacing: 6) {
                 StatusDot(color: gatewayStatusColor)
                 Text(gatewayStatusLabel)
@@ -92,8 +76,8 @@ struct GatewayConfigPage: View {
     private var gatewayStatusLabel: String {
         switch viewModel.gatewayStatus {
         case .checking:     return "检测中"
-        case .connected:    return "网关已连接"
-        case .disconnected: return "网关未连接"
+        case .connected:    return "已连接"
+        case .disconnected: return "未连接"
         }
     }
 
@@ -108,50 +92,38 @@ struct GatewayConfigPage: View {
     // MARK: - Content
 
     private var content: some View {
-        VStack(spacing: 0) {
-            gatewayStatusBar
-                .padding(.horizontal, 24)
-                .padding(.top, 16)
+        VStack(spacing: 20) {
+            Spacer()
 
-            // Tab 切换
-            TabView(selection: $selectedTab) {
-                FeishuConfigSection(viewModel: viewModel)
-                    .tag(0)
-                    .tabItem {
-                        Label("飞书 / Lark", systemImage: "message.fill")
-                    }
-                WeixinConfigSection(viewModel: viewModel)
-                    .tag(1)
-                    .tabItem {
-                        Label("微信", systemImage: "phone.fill")
-                    }
-            }
-            .tabViewStyle(.automatic)
+            statusCard
+            actionCard
+
+            Spacer()
         }
+        .padding(.horizontal, 40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // MARK: - Gateway status bar
+    // MARK: - Status card
 
-    private var gatewayStatusBar: some View {
-        HStack(spacing: 16) {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
-                    StatusDot(color: gatewayStatusColor)
+    private var statusCard: some View {
+        VStack(spacing: 16) {
+            HStack(spacing: 10) {
+                StatusDot(color: gatewayStatusColor)
+                VStack(alignment: .leading, spacing: 2) {
                     Text(gatewayStatusLabel)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(GCPalette.textPrimary)
+                    Text("端口 \(AppConstants.defaultGatewayPort)")
+                        .font(.system(size: 11))
+                        .foregroundColor(GCPalette.textTertiary)
                 }
-                Text("端口 \(AppConstants.defaultGatewayPort) · Hermes Gateway")
-                    .font(.system(size: 11))
-                    .foregroundColor(GCPalette.textTertiary)
+                Spacer()
             }
-
-            Spacer()
 
             HStack(spacing: 10) {
                 PrimaryButton(
-                    title: viewModel.isGatewayBusy ? "处理中..." : "启动网关",
+                    title: viewModel.isGatewayBusy ? "处理中..." : "启动",
                     icon: "play.fill"
                 ) {
                     viewModel.startGateway()
@@ -159,7 +131,7 @@ struct GatewayConfigPage: View {
                 .disabled(viewModel.isGatewayBusy || viewModel.gatewayStatus == .connected)
 
                 SecondaryButton(
-                    title: "停止网关",
+                    title: "停止",
                     icon: "stop.fill"
                 ) {
                     viewModel.stopGateway()
@@ -178,13 +150,58 @@ struct GatewayConfigPage: View {
                 .disabled(viewModel.isGatewayBusy)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
+        .padding(20)
         .background(
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: 12)
                 .fill(GCPalette.bgPanel)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10)
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(GCPalette.border, lineWidth: 1)
+                )
+        )
+    }
+
+    // MARK: - Action card
+
+    private var actionCard: some View {
+        VStack(spacing: 16) {
+            VStack(spacing: 6) {
+                Image(systemName: "qrcode")
+                    .font(.system(size: 32, weight: .light))
+                    .foregroundColor(GCPalette.textPrimary)
+                Text("扫码连接")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(GCPalette.textPrimary)
+                Text("运行 hermes gateway setup 完成扫码与连接")
+                    .font(.system(size: 11))
+                    .foregroundColor(GCPalette.textTertiary)
+                    .multilineTextAlignment(.center)
+            }
+
+            VStack(spacing: 10) {
+                PrimaryButton(
+                    title: "开始扫码配置",
+                    icon: "qrcode"
+                ) {
+                    viewModel.startSetup()
+                }
+                .frame(maxWidth: .infinity)
+
+                SecondaryButton(
+                    title: "在终端打开",
+                    icon: "terminal"
+                ) {
+                    viewModel.openSetupInTerminal()
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .padding(24)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(GCPalette.bgPanel)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
                         .stroke(GCPalette.border, lineWidth: 1)
                 )
         )
@@ -197,7 +214,7 @@ struct GatewayConfigPage: View {
 struct GatewayConfigPage_Previews: PreviewProvider {
     static var previews: some View {
         GatewayConfigPage()
-            .frame(width: 900, height: 640)
+            .frame(width: 720, height: 520)
     }
 }
 #endif

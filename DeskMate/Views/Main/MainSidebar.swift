@@ -42,15 +42,10 @@ struct MainSidebar: View {
 
     private var logoHeader: some View {
         HStack(spacing: 10) {
-            // 黑白 logo 占位
-            ZStack {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(Palette.textPrimary)
-                    .frame(width: 26, height: 26)
-                Image(systemName: "command")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(Palette.bgPanel)
-            }
+            Image("applogo")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 26, height: 26)
 
             Text("DeskMate")
                 .font(.system(size: 17, weight: .semibold))

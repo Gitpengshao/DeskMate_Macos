@@ -2,8 +2,11 @@ import SwiftUI
 
 /// AI 对话主页面 — 整体黑白风格设计。
 struct AiChatPage: View {
-    @StateObject private var chatVM = AiChatViewModel()
-    @StateObject private var sessionVM = SessionListViewModel()
+    /// 由外部注入并缓存的 AI 对话 ViewModel，切换 tab 时不回收，保证 SSE 流持续进行。
+    @ObservedObject var chatVM: AiChatViewModel
+    /// 由外部注入并缓存的会话列表 ViewModel，与 chatVM 保持同一生命周期。
+    @ObservedObject var sessionVM: SessionListViewModel
+
     @State private var searchText = ""
     @State private var inputText = ""
     @State private var showFilePicker = false
@@ -44,6 +47,12 @@ struct AiChatPage: View {
             // 兜底消费：用户可能先在工作区窗口添加了引用，再切到 AI 对话页。
             // 用 async 避免 "Modifying state during view update" 警告。
             DispatchQueue.main.async { self.consumePendingReference() }
+        }
+        .onChange(of: chatVM.model.inputText) { _, newValue in
+            // 语音输入会修改 chatVM.model.inputText，同步到本地 @State 输入框。
+            if inputText != newValue {
+                inputText = newValue
+            }
         }
         .onReceive(WorkspaceReferenceBridge.shared.$pendingReference) { _ in
             // bridge 发布新值时立刻消费，覆盖"AI 对话页已在前台"的场景。
@@ -147,7 +156,9 @@ struct AiChatPage: View {
                 isDark: isDark,
                 reasoningEffort: chatVM.model.reasoningEffort,
                 workingDirectory: chatVM.model.workingDirectory,
-                currentProfile: HermesGatewayService.shared.currentProfile,
+                currentProfile: chatVM.profile,
+                isRecording: chatVM.model.isRecording,
+                voiceError: chatVM.model.voiceError,
                 onSend: {
                     chatVM.updateInput(inputText)
                     chatVM.sendMessage()
@@ -158,6 +169,7 @@ struct AiChatPage: View {
                 onWorkingDirectoryChange: { chatVM.setWorkingDirectory($0) },
                 onStop: { chatVM.stopStream() },
                 onRemoveReference: { chatVM.removeReference($0) },
+                onToggleVoiceRecording: { chatVM.toggleVoiceRecording() },
                 showFilePicker: $showFilePicker
             )
         }
@@ -206,6 +218,16 @@ struct AiChatPage: View {
                 if isStreaming {
                     withAnimation(.easeOut(duration: 0.2)) {
                         proxy.scrollTo("streaming", anchor: .bottom)
+                    }
+                }
+            }
+            .onAppear {
+                // 切换回 AI 对话 tab 时，若任务仍在进行则定位到流式气泡，
+                // 否则定位到最后一条消息，避免重建后滚动位置回到顶部。
+                let targetId = isStreaming ? "streaming" : displayMessages.last?.id
+                if let targetId = targetId {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        proxy.scrollTo(targetId, anchor: .bottom)
                     }
                 }
             }

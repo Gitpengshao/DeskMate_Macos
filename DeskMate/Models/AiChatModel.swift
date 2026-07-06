@@ -98,4 +98,15 @@ struct AiChatModel: Equatable {
     var isStreaming: Bool {
         connectionState == .streaming || connectionState == .connecting
     }
+
+    // MARK: - Voice input
+
+    /// 是否正在通过麦克风进行本地语音识别。
+    var isRecording: Bool = false
+
+    /// 语音转写的实时文本；录音时同步写入输入框，结束后清空。
+    var voiceTranscribedText: String = ""
+
+    /// 语音识别错误提示。
+    var voiceError: String? = nil
 }

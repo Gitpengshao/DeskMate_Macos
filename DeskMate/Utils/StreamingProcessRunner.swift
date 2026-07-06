@@ -2,17 +2,11 @@ import Foundation
 
 /// 流式执行外部命令的共享工具。
 ///
-/// 复用 `OpenVikingProvider` 中经过验证的 Process 流式模式：
+/// 实现要点：
 /// - 用 `readDataToEndOfFile()` 在后台队列排空管道（避免 `readabilityHandler` 大输出丢数据/死锁）；
 /// - `terminationHandler` + `ResumeOnceFlag` 唤醒 async continuation；
 /// - `OutputTicker` 每 0.4s 节流推送尾部日志；
 /// - 超时强杀（SIGTERM → 2s 后 SIGKILL）。
-///
-/// 相比 `OpenVikingProvider.runProcess`，本工具额外支持注入自定义 `environment`
-/// （用于进程级 git insteadOf 镜像）和 `onProcessReady` 回调（供外部 `terminate()` 取消）。
-///
-/// `StreamCapture` / `ResumeOnceFlag` / `OutputTicker` 直接复用
-/// `OpenVikingProvider.swift` 末尾的 internal 声明，不在此重复定义。
 enum StreamingProcessRunner {
 
     /// 命令执行结果。
@@ -238,5 +232,84 @@ enum StreamingProcessRunner {
         guard !lines.isEmpty else { return "" }
         let tail = lines.suffix(max)
         return tail.joined(separator: "\n")
+    }
+}
+
+// MARK: - Process streaming helpers
+
+/// 线程安全的流数据收集器（用于 stdout/stderr 缓冲）。
+final class StreamCapture: @unchecked Sendable {
+    private var data = Data()
+    private let lock = NSLock()
+
+    nonisolated init() {}
+
+    nonisolated func append(_ chunk: Data) {
+        lock.lock()
+        data.append(chunk)
+        lock.unlock()
+    }
+
+    nonisolated func snapshot() -> String {
+        lock.lock()
+        let copy = data
+        lock.unlock()
+        return String(data: copy, encoding: .utf8) ?? ""
+    }
+}
+
+/// 线程安全的"只 resume 一次"标志 — 防止 Process terminationHandler
+/// 在超时被同时触发时对同一个 continuation 多次 resume。
+final class ResumeOnceFlag: @unchecked Sendable {
+    private var done = false
+    private let lock = NSLock()
+
+    nonisolated init() {}
+
+    /// 当前是否已 resume。
+    nonisolated var isResumed: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return done
+    }
+    /// 尝试标记为已 resume。返回 `true` 表示本次调用获得了"resume 权"。
+    nonisolated func tryResume() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if done { return false }
+        done = true
+        return true
+    }
+}
+
+/// 节流定时器：按指定间隔重复调用 callback，直到 `stop()`。
+final class OutputTicker: @unchecked Sendable {
+    private let interval: TimeInterval
+    private let callback: () -> Void
+    private let lock = NSLock()
+    private var stopped = false
+    private let queue = DispatchQueue(label: "streamingrunner.ticker", qos: .utility)
+
+    nonisolated init(interval: TimeInterval, callback: @escaping () -> Void) {
+        self.interval = interval
+        self.callback = callback
+    }
+
+    nonisolated func start() {
+        scheduleNext()
+    }
+
+    nonisolated func stop() {
+        lock.lock(); stopped = true; lock.unlock()
+    }
+
+    nonisolated private func scheduleNext() {
+        queue.asyncAfter(deadline: .now() + interval) { [weak self] in
+            guard let self else { return }
+            self.lock.lock()
+            let shouldStop = self.stopped
+            self.lock.unlock()
+            if shouldStop { return }
+            self.callback()
+            self.scheduleNext()
+        }
     }
 }

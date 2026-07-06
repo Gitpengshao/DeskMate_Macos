@@ -38,7 +38,7 @@ enum MMText {
     // Tabs
     static let tabMemory      = "记忆"
     static let tabUserProfile = "用户画像"
-    static let tabProviders   = "Provider"
+    static let tabSoulProfile = "灵魂画像"
 
     // Capacity
     static func capacity(used: String, total: String, entries: String) -> String {
@@ -59,41 +59,16 @@ enum MMText {
     // States
     static let loadingMemories  = "加载记忆中..."
     static let loadingPersonas  = "加载用户画像..."
+    static let loadingSoul      = "加载灵魂画像..."
     static let emptyMemory      = "暂无记忆条目"
     static let emptyPersona     = "暂无用户画像"
+    static let emptySoul        = "暂无灵魂画像"
 
     // Delete dialog
     static let deletePersonaTitle   = "删除该条目？"
     static func deletePersonaConfirm(_ preview: String) -> String {
         return "将永久删除：\(preview)"
     }
-
-    // Provider card
-    static let providersHeader        = "外部记忆 Provider"
-    static let providerBestFor        = "适用场景"
-    static let providerRequires       = "依赖"
-    static let providerStorage        = "数据存储"
-    static let providerCost           = "费用"
-    static let providerPython         = "Python"
-    static let providerPythonNone     = "未找到可用 Python 解释器"
-    static let providerPythonChange   = "选择解释器"
-    static let providerPythonRescan   = "重新检测"
-
-    static let providerRunning    = "运行中"
-    static let providerInstalling = "安装中"
-    static let providerError      = "错误"
-    static let providerStopped    = "已停止"
-    static let providerDisabled   = "未启用"
-
-    // Python picker
-    static let pythonPickerTitle         = "选择 Python 解释器"
-    static let pythonPickerSubtitle      = "OpenViking 需要通过 pip 安装，请选择一个能访问 PyPI 的 Python 3.10+ 解释器。"
-    static let pythonPickerEmpty         = "未扫描到任何 Python 解释器，请确认已安装 Python 3.10+"
-    static let pythonPickerScanning      = "正在扫描..."
-    static let pythonPickerClear         = "清除手动选择"
-    static let pythonPickerCurrent       = "当前"
-    static let pythonPickerSystem        = "系统"
-    static let pythonPickerClose         = "关闭"
 
     // Errors
     static let errorBannerTitle = "操作失败"
