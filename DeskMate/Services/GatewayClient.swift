@@ -56,10 +56,79 @@ final class GatewaySseStream {
     }
 }
 
+/// OpenAI 兼容的多模态内容片段。
+enum ChatContentPart: Encodable {
+    case text(String)
+    case imageUrl(String)
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .text(let text):
+            try container.encode("text", forKey: .type)
+            try container.encode(text, forKey: .text)
+        case .imageUrl(let url):
+            try container.encode("image_url", forKey: .type)
+            try container.encode(ImageUrl(url: url), forKey: .imageUrl)
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case type, text
+        case imageUrl = "image_url"
+    }
+
+    private struct ImageUrl: Encodable {
+        let url: String
+    }
+}
+
 /// 单条 Chat Completion 消息 — 对齐 Flutter `ChatMessage`（gateway 客户端版本）。
-struct GatewayChatMessage: Codable {
+///
+/// `content` 支持纯文本（assistant/system/tool）或多模态数组（user 视觉消息）。
+struct GatewayChatMessage: Encodable {
     let role: String
-    let content: String
+    let content: GatewayChatMessageContent
+
+    /// 便捷构造纯文本消息。
+    init(role: String, content: String) {
+        self.role = role
+        self.content = .text(content)
+    }
+
+    /// 便捷构造多模态消息（文本 + 图片）。
+    init(role: String, parts: [ChatContentPart]) {
+        self.role = role
+        self.content = .parts(parts)
+    }
+
+    /// 用于日志/调试的纯文本近似长度（多模态消息只统计文本部分）。
+    var contentText: String {
+        switch content {
+        case .text(let string): return string
+        case .parts(let parts):
+            return parts.compactMap {
+                if case .text(let t) = $0 { return t }
+                return nil
+            }.joined()
+        }
+    }
+}
+
+/// Gateway 消息内容 — 纯文本或多模态数组。
+enum GatewayChatMessageContent: Encodable {
+    case text(String)
+    case parts([ChatContentPart])
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .text(let string):
+            try container.encode(string)
+        case .parts(let parts):
+            try container.encode(parts)
+        }
+    }
 }
 
 /// Chat Completion 请求体 — 对齐 Flutter `ChatCompletionRequest`。
@@ -191,7 +260,18 @@ final class GatewayClient {
     /// 拉取会话完整消息历史（`GET /api/sessions/{id}/messages`）。
     func getSessionMessages(_ sessionId: String) async -> [[String: Any]]? {
         guard let json = await getJson("/api/sessions/\(sessionId)/messages") else { return nil }
-        if let data = json["data"] as? [[String: Any]] { return data }
+        if let data = json["data"] as? [[String: Any]] {
+            DMLogger.log(
+                "[DEBUG] getSessionMessages: sessionId=\(sessionId) count=\(data.count) " +
+                "firstMessageKeys=\(data.first?.keys.sorted() ?? [])",
+                name: "GatewayClient"
+            )
+            return data
+        }
+        DMLogger.log(
+            "[DEBUG] getSessionMessages: sessionId=\(sessionId) no data array, jsonKeys=\(json.keys.sorted())",
+            name: "GatewayClient"
+        )
         return nil
     }
 

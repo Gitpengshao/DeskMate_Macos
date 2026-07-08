@@ -265,12 +265,14 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2C4F5X579K;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "DeskMate 需要访问麦克风以进行语音输入，语音识别在本地完成，不会上传音频。";
+				INFOPLIST_KEY_NSScreenCaptureUsageDescription = "DeskMate 需要截取屏幕内容以发送给 AI 进行识别和回答。";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "DeskMate 需要使用语音识别将您的语音转换为文本，识别过程在本地完成。";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -304,6 +306,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "DeskMate 需要访问麦克风以进行语音输入，语音识别在本地完成，不会上传音频。";
+				INFOPLIST_KEY_NSScreenCaptureUsageDescription = "DeskMate 需要截取屏幕内容以发送给 AI 进行识别和回答。";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "DeskMate 需要使用语音识别将您的语音转换为文本，识别过程在本地完成。";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

@@ -119,7 +119,7 @@ final class ChatService {
                 "reasoning_effort=\(reasoningEffort ?? "nil") " +
                 "messages=\(messages.count) " +
                 "lastRole=\(messages.last?.role ?? "?") " +
-                "lastContentLen=\(messages.last?.content.count ?? 0)",
+                "lastContentLen=\(messages.last?.contentText.count ?? 0)",
                 name: "ChatService"
             )
 
@@ -306,6 +306,16 @@ final class ChatService {
     func syncSessionMessages(_ sessionId: String) async -> [SyncedMessage] {
         guard let raw = await gateway.getSessionMessages(sessionId), !raw.isEmpty else {
             return []
+        }
+        for (i, m) in raw.enumerated() {
+            let content = m["content"]
+            let contentType = String(describing: type(of: content))
+            let role = m["role"] as? String ?? "nil"
+            DMLogger.log(
+                "[DEBUG] syncSessionMessages raw[\(i)] role=\(role) " +
+                "contentType=\(contentType) keys=\(m.keys.sorted())",
+                name: "ChatService"
+            )
         }
         return raw.map { SyncedMessage(from: $0) }
     }

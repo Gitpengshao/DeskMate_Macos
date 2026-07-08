@@ -120,21 +120,55 @@ struct UserMessageBubble: View {
     let isDark: Bool
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: 4) {
-            Text(message.text)
-                .font(.system(size: 13))
-                .foregroundColor(Palette.inverseInk)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Palette.inverse)
-                )
+        VStack(alignment: .trailing, spacing: 6) {
+            VStack(alignment: .trailing, spacing: 6) {
+                if !message.imageAttachments.isEmpty {
+                    imageAttachmentsGrid
+                }
+
+                if !message.text.isEmpty {
+                    Text(message.text)
+                        .font(.system(size: 13))
+                        .foregroundColor(Palette.inverseInk)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Palette.inverse)
+                        )
+                }
+            }
             Text(message.timestamp)
                 .font(.system(size: 10))
                 .foregroundColor(Palette.textTertiary)
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+
+    /// 图片附件网格预览（单图大图展示，多图最大 3 列缩略图）。
+    private var imageAttachmentsGrid: some View {
+        let count = message.imageAttachments.count
+        let isSingle = count == 1
+        let columns = Array(
+            repeating: GridItem(.flexible(), spacing: 6),
+            count: isSingle ? 1 : min(3, count)
+        )
+        return LazyVGrid(columns: columns, alignment: .trailing, spacing: 6) {
+            ForEach(message.imageAttachments) { attachment in
+                if let image = NSImage.fromDataUrl(attachment.dataUrl) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: isSingle ? .fit : .fill)
+                        .frame(
+                            width: isSingle ? 220 : 80,
+                            height: isSingle ? 220 : 80
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: isSingle ? 12 : 8))
+                        .help(attachment.displayName)
+                }
+            }
+        }
+        .frame(maxWidth: isSingle ? .infinity : 260, alignment: .trailing)
     }
 }
 

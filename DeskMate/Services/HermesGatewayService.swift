@@ -64,6 +64,22 @@ final class HermesGatewayService {
         }
     }
 
+    /// 重启指定 profile 的 Gateway，保持原有端口不变。
+    ///
+    /// 用于 `terminal.cwd` 等配置变更后让 Hermes 立即重新读取 config.yaml。
+    func restartGateway(for profile: String?) async -> (port: Int, apiKey: String)? {
+        let key = registryKey(for: profile)
+        let existingPort = await registry.instances[key]?.port
+
+        DMLogger.log(
+            "restartGateway: 准备重启 profile=\(profile ?? "default") port=\(existingPort ?? -1)",
+            name: "HermesGateway"
+        )
+
+        await stopGateway(for: profile)
+        return await startGatewayInternal(profile: profile, preferredPort: existingPort)
+    }
+
     /// 停止所有已注册的 Gateway 进程。
     func stopAllGateways() async {
         let instances = await Array(registry.instances.values)

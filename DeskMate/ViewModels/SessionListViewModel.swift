@@ -62,6 +62,8 @@ final class SessionListViewModel: ObservableObject {
         Task { [weak self] in
             guard let self = self else { return }
             _ = await self.apiService.deleteSessions([id])
+            // 同步清理本地图片附件索引
+            ImageAttachmentCache.shared.deleteAttachments(forSessionId: id)
             await MainActor.run {
                 self.state.sessions.removeAll { $0.id == id }
             }

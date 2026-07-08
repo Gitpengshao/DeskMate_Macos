@@ -932,10 +932,20 @@ final class HermesConfigWriter {
         var newLines = lines
         newLines.remove(at: idx)
 
+        // 重新计算块结束位置（基于移除 key 行后的新数组）
+        var newBlockEnd = newLines.count
+        for j in (start + 1)..<newLines.count {
+            let l = newLines[j]
+            if l.isEmpty { continue }
+            if !l.hasPrefix(" ") && !l.hasPrefix("\t") {
+                newBlockEnd = j
+                break
+            }
+        }
+
         // 若块内只剩空行/注释，则移除整个块
         var remainingNonEmpty = false
-        for i in (start + 1)..<blockEnd {
-            if i == idx { continue }
+        for i in (start + 1)..<newBlockEnd {
             let trimmed = newLines[i].trimmingCharacters(in: .whitespaces)
             if !trimmed.isEmpty && !trimmed.hasPrefix("#") {
                 remainingNonEmpty = true
@@ -943,7 +953,7 @@ final class HermesConfigWriter {
             }
         }
         if !remainingNonEmpty {
-            newLines.removeSubrange(start..<blockEnd)
+            newLines.removeSubrange(start..<newBlockEnd)
         }
 
         return newLines.joined(separator: "\n")

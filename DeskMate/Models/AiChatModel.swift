@@ -27,6 +27,17 @@ struct ReferenceItem: Identifiable, Equatable, Codable {
     var displayName: String { (path as NSString).lastPathComponent }
 }
 
+/// 聊天消息中附带的图片 — 以 base64 data URL 形式存储，对齐 Hermes 视觉内容格式。
+struct ChatImageAttachment: Identifiable, Equatable, Codable {
+    let id: String
+    /// `data:image/png;base64,...` 编码后的图像数据。
+    let dataUrl: String
+    /// 本地缓存路径（如保存到 `~/.hermes/images/`）。
+    let localPath: String?
+    /// 原始文件名或截图时生成的时间戳文件名，用于 UI 显示。
+    let displayName: String
+}
+
 /// 单条聊天消息 — 对齐 Flutter `ChatMessage`。
 struct ChatMessage: Identifiable, Equatable, Codable {
     let id: String
@@ -34,6 +45,8 @@ struct ChatMessage: Identifiable, Equatable, Codable {
     var text: String
     let timestamp: String
     var toolCall: String? // 例如：'🔧 已调用: weather_search(location="Beijing")'
+    /// 用户消息附带的图片（多模态视觉输入）。
+    var imageAttachments: [ChatImageAttachment] = []
 }
 
 /// AI 对话页面整体状态 — 对齐 Flutter `AiChatModel`。
@@ -47,9 +60,19 @@ struct AiChatModel: Equatable {
     /// 用户在输入框中选中的文件/目录引用列表。
     var selectedReferences: [ReferenceItem] = []
 
+    /// 用户在输入框中附加的图片列表（待发送）。
+    var pendingImageAttachments: [ChatImageAttachment] = []
+
     /// 将选中的引用拼接为发送给 Hermes 的文本片段（使用绝对路径）。
     var referenceText: String {
         selectedReferences.map { $0.path }.joined(separator: " ")
+    }
+
+    /// 当前输入是否为空（文本、引用、图片都没有）。
+    var isInputEmpty: Bool {
+        inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        && selectedReferences.isEmpty
+        && pendingImageAttachments.isEmpty
     }
 
     /// 当前会话 ID（来自 Hermes 后端）。

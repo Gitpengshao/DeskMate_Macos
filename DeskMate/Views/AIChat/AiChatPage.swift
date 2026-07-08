@@ -151,6 +151,7 @@ struct AiChatPage: View {
             InputBar(
                 text: $inputText,
                 selectedReferences: $chatVM.model.selectedReferences,
+                pendingImageAttachments: $chatVM.model.pendingImageAttachments,
                 isStreaming: chatVM.model.isStreaming,
                 petNameKey: chatVM.model.petNameKey,
                 isDark: isDark,
@@ -170,6 +171,8 @@ struct AiChatPage: View {
                 onStop: { chatVM.stopStream() },
                 onRemoveReference: { chatVM.removeReference($0) },
                 onToggleVoiceRecording: { chatVM.toggleVoiceRecording() },
+                onAddImageAttachment: { chatVM.addImageAttachment($0) },
+                onRemoveImageAttachment: { chatVM.removeImageAttachment($0) },
                 showFilePicker: $showFilePicker
             )
         }
@@ -180,7 +183,10 @@ struct AiChatPage: View {
 
     @ViewBuilder
     private var messagesArea: some View {
-        let displayMessages = chatVM.model.messages.filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let displayMessages = chatVM.model.messages.filter {
+            !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !$0.imageAttachments.isEmpty
+        }
         let isStreaming = chatVM.model.isStreaming || !chatVM.model.toolProgressEvents.isEmpty
 
         ScrollViewReader { proxy in

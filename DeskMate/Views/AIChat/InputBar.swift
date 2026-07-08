@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 /// 聊天输入栏 — 整体黑白风格设计。
 ///
@@ -13,6 +14,7 @@ import AppKit
 struct InputBar: View {
     @Binding var text: String
     @Binding var selectedReferences: [ReferenceItem]
+    @Binding var pendingImageAttachments: [ChatImageAttachment]
     let isStreaming: Bool
     let petNameKey: String
     let isDark: Bool
@@ -28,6 +30,8 @@ struct InputBar: View {
     let onStop: () -> Void
     let onRemoveReference: (String) -> Void
     let onToggleVoiceRecording: () -> Void
+    let onAddImageAttachment: (ChatImageAttachment) -> Void
+    let onRemoveImageAttachment: (String) -> Void
     /// 是否显示工作区文件选择弹窗（由父视图 AiChatPage 控制）。
     @Binding var showFilePicker: Bool
 
@@ -56,6 +60,10 @@ struct InputBar: View {
             // 引用文件/目录 chips
             if !selectedReferences.isEmpty {
                 referenceChipsArea
+            }
+            // 图片附件 chips
+            if !pendingImageAttachments.isEmpty {
+                imageAttachmentsArea
             }
             // 语音错误提示
             if let voiceError = voiceError, !voiceError.isEmpty {
@@ -259,6 +267,91 @@ struct InputBar: View {
         .help(ref.path)
     }
 
+    // MARK: - Image attachment chips
+
+    /// 待发送图片附件预览区 — 显示在输入框上方，用户可继续输入文字后一起发送。
+    private var imageAttachmentsArea: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(pendingImageAttachments) { attachment in
+                    imageAttachmentChip(attachment)
+                }
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 4)
+        }
+        .padding(.horizontal, 10)
+        .background(Palette.bgBase)
+        .overlay(
+            Rectangle()
+                .fill(Palette.border)
+                .frame(height: 1),
+            alignment: .bottom
+        )
+    }
+
+    /// 单个图片附件 chip — 左侧缩略图、右侧文件名 + 删除按钮。
+    private func imageAttachmentChip(_ attachment: ChatImageAttachment) -> some View {
+        HStack(spacing: 8) {
+            if let image = NSImage.fromDataUrl(attachment.dataUrl) {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 44, height: 44)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            } else {
+                Image(systemName: "photo")
+                    .font(.system(size: 20))
+                    .foregroundColor(Palette.textSecond)
+                    .frame(width: 44, height: 44)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(attachment.displayName)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(Palette.textPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Text("\(imagePixelDescription(for: attachment)) · 已附加")
+                    .font(.system(size: 10))
+                    .foregroundColor(Palette.textTertiary)
+                    .lineLimit(1)
+            }
+            .frame(width: 90, alignment: .leading)
+
+            Button(action: { onRemoveImageAttachment(attachment.id) }) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(Palette.textTertiary)
+                    .frame(width: 18, height: 18)
+                    .background(
+                        Circle()
+                            .fill(Palette.bgPanel)
+                            .overlay(Circle().stroke(Palette.border, lineWidth: 1))
+                    )
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Palette.bgElevated)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Palette.border, lineWidth: 1)
+                )
+        )
+        .help(attachment.localPath ?? attachment.displayName)
+    }
+
+    /// 从 data URL 解析出图片尺寸描述，用于 chip 副标题。
+    private func imagePixelDescription(for attachment: ChatImageAttachment) -> String {
+        guard let image = NSImage.fromDataUrl(attachment.dataUrl) else { return "未知尺寸" }
+        return "\(Int(image.size.width))×\(Int(image.size.height))"
+    }
+
     // MARK: - Input area (rich text)
 
     /// 富文本输入框 — 基于 `NSTextView` 的 SwiftUI 包装。
@@ -309,7 +402,8 @@ struct InputBar: View {
                 },
                 workingDirectory: workingDirectory,
                 isFilePickerPresented: $showFilePicker,
-                onFilePickerTrigger: { showFilePicker = true }
+                onFilePickerTrigger: { showFilePicker = true },
+                onPasteImage: { onAddImageAttachment($0) }
             )
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -397,8 +491,8 @@ struct InputBar: View {
             // 语音输入按钮
             voiceButton
 
-            // 图片按钮（占位，与原有行为一致）
-            iconButton(systemName: "photo")
+            // 图片按钮：展开菜单选择截图或本地图片
+            imageAttachmentMenu
 
             // 发送按钮
             sendButton
@@ -408,7 +502,8 @@ struct InputBar: View {
 
     /// 工作区目录选择按钮。
     private var workingDirectoryButton: some View {
-        Button(action: selectWorkingDirectory) {
+        let hasCwd = workingDirectory?.isEmpty == false
+        return ZStack(alignment: .topTrailing) {
             HStack(spacing: 6) {
                 Image(systemName: workingDirectoryIcon)
                     .font(.system(size: 10, weight: .medium))
@@ -428,10 +523,31 @@ struct InputBar: View {
                             .stroke(Palette.border, lineWidth: 1)
                     )
             )
+            .contentShape(RoundedRectangle(cornerRadius: 6))
+            .onTapGesture { selectWorkingDirectory() }
+
+            if hasCwd {
+                Button(action: { onWorkingDirectoryChange(nil) }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundColor(Palette.textTertiary)
+                        .frame(width: 14, height: 14)
+                        .background(
+                            Circle()
+                                .fill(Palette.bgPanel)
+                                .overlay(
+                                    Circle()
+                                        .stroke(Palette.border, lineWidth: 1)
+                                )
+                        )
+                }
+                .buttonStyle(.plain)
+                .padding([.top, .trailing], 2)
+                .help("清除工作区")
+            }
         }
-        .buttonStyle(.plain)
         .contextMenu {
-            if let dir = workingDirectory, !dir.isEmpty {
+            if hasCwd {
                 Button("清除工作区") {
                     onWorkingDirectoryChange(nil)
                 }
@@ -501,8 +617,8 @@ struct InputBar: View {
             )
         }
         .buttonStyle(.plain)
-        .disabled(!isStreaming && text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && selectedReferences.isEmpty)
-        .opacity((!isStreaming && text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && selectedReferences.isEmpty) ? 0.4 : 1.0)
+        .disabled(!isStreaming && text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && selectedReferences.isEmpty && pendingImageAttachments.isEmpty)
+        .opacity((!isStreaming && text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && selectedReferences.isEmpty && pendingImageAttachments.isEmpty) ? 0.4 : 1.0)
     }
 
     private var voiceButton: some View {
@@ -526,9 +642,28 @@ struct InputBar: View {
         .help(isRecording ? "点击结束录音" : "点击开始语音输入")
     }
 
-    private func iconButton(systemName: String) -> some View {
-        Button(action: {}) {
-            Image(systemName: systemName)
+    /// 图片附件菜单按钮 — 点击展开“截图”与“选择本地图片”选项。
+    private var imageAttachmentMenu: some View {
+        Menu {
+            Button {
+                takeScreenshot()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "camera.viewfinder")
+                    Text("截图")
+                }
+            }
+
+            Button {
+                selectLocalImage()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "photo.on.rectangle.angled")
+                    Text("选择本地图片")
+                }
+            }
+        } label: {
+            Image(systemName: "photo")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(Palette.textSecond)
                 .frame(width: 32, height: 32)
@@ -541,15 +676,58 @@ struct InputBar: View {
                         )
                 )
         }
-        .buttonStyle(.plain)
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .disabled(isStreaming)
+        .opacity(isStreaming ? 0.4 : 1.0)
     }
 
     // MARK: - Actions
 
     private func send() {
         guard !isStreaming else { return }
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !selectedReferences.isEmpty else { return }
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+              || !selectedReferences.isEmpty
+              || !pendingImageAttachments.isEmpty else { return }
         onSend()
+    }
+
+    /// 调用系统截图工具捕获区域截图。
+    private func takeScreenshot() {
+        ImageAttachmentManager.shared.captureScreenshot { result in
+            switch result {
+            case .success(let attachment):
+                self.onAddImageAttachment(attachment)
+            case .failure(let error):
+                // 用户主动取消不弹提示。
+                if let err = error as? ImageAttachmentError, err == ImageAttachmentError.cancelled {
+                    return
+                }
+                DMLogger.log("Screenshot failed: \(error.localizedDescription)", name: "InputBar")
+            }
+        }
+    }
+
+    /// 弹出 NSOpenPanel 选择本地图片文件。
+    private func selectLocalImage() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.prompt = "选择"
+        panel.allowedContentTypes = [.png, .jpeg, .tiff, .gif, .image]
+
+        guard panel.runModal() == .OK else { return }
+        for url in panel.urls {
+            ImageAttachmentManager.shared.attachImage(from: url) { result in
+                switch result {
+                case .success(let attachment):
+                    self.onAddImageAttachment(attachment)
+                case .failure(let error):
+                    DMLogger.log("Attach image failed: \(error.localizedDescription)", name: "InputBar")
+                }
+            }
+        }
     }
 
     private func stop() {
@@ -589,6 +767,8 @@ struct RichTextEditor: NSViewRepresentable {
     var isFilePickerPresented: Binding<Bool>? = nil
     /// 检测到 `#` 且满足条件时的回调。
     var onFilePickerTrigger: (() -> Void)? = nil
+    /// 从剪贴板粘贴图片时的回调。
+    var onPasteImage: ((ChatImageAttachment) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -799,7 +979,56 @@ struct RichTextEditor: NSViewRepresentable {
                 parent.onSubmit()
                 return true
             }
+
+            if selector == #selector(NSText.paste(_:)) {
+                return handlePasteImage()
+            }
+
             return false
+        }
+
+        /// 拦截 Cmd+V；剪贴板里有图片时转成附件并阻止默认文本粘贴，否则保持原行为。
+        private func handlePasteImage() -> Bool {
+            let pasteboard = NSPasteboard.general
+            guard parent.onPasteImage != nil else { return false }
+
+            // 1. 优先读取剪贴板中的图片对象（截图、浏览器复制图片等）。
+            if let images = pasteboard.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage],
+               let image = images.first {
+                ImageAttachmentManager.shared.attachImage(from: image, displayName: "pasted_image") { result in
+                    switch result {
+                    case .success(let attachment):
+                        self.parent.onPasteImage?(attachment)
+                    case .failure(let error):
+                        DMLogger.log("Paste image failed: \(error.localizedDescription)", name: "InputBar")
+                    }
+                }
+                return true
+            }
+
+            // 2. 兼容剪贴板中的文件 URL（如 macOS 截图临时路径、file:// 图片 URI）。
+            if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL],
+               let url = urls.first,
+               url.isFileURL,
+               isImageFile(url) {
+                ImageAttachmentManager.shared.attachImage(from: url) { result in
+                    switch result {
+                    case .success(let attachment):
+                        self.parent.onPasteImage?(attachment)
+                    case .failure(let error):
+                        DMLogger.log("Paste image file failed: \(error.localizedDescription)", name: "InputBar")
+                    }
+                }
+                return true
+            }
+
+            return false
+        }
+
+        private func isImageFile(_ url: URL) -> Bool {
+            let imageTypes: [UTType] = [.png, .jpeg, .tiff, .gif, .image]
+            guard let type = UTType(filenameExtension: url.pathExtension) else { return false }
+            return imageTypes.contains { type.conforms(to: $0) }
         }
     }
 }
@@ -817,4 +1046,16 @@ private enum Palette {
     static let inverse     = Color(red: 1.000, green: 1.000, blue: 1.000)
     static let inverseInk  = Color(red: 0.000, green: 0.000, blue: 0.000)
     static let recording   = Color(red: 0.920, green: 0.250, blue: 0.250)
+}
+
+// MARK: - NSImage helpers
+
+extension NSImage {
+    /// 从 `data:image/...;base64,...` 字符串解析为 NSImage。
+    static func fromDataUrl(_ dataUrl: String) -> NSImage? {
+        guard let commaIndex = dataUrl.firstIndex(of: ",") else { return nil }
+        let base64 = String(dataUrl[dataUrl.index(after: commaIndex)...])
+        guard let data = Data(base64Encoded: base64) else { return nil }
+        return NSImage(data: data)
+    }
 }

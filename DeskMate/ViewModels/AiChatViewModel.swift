@@ -131,6 +131,28 @@ final class AiChatViewModel: ObservableObject {
         model.selectedReferences = []
     }
 
+    // MARK: - Image attachments
+
+    /// 添加图片附件到输入区。
+    func addImageAttachment(_ attachment: ChatImageAttachment) {
+        guard !model.pendingImageAttachments.contains(where: { $0.id == attachment.id }) else { return }
+        model.pendingImageAttachments.append(attachment)
+        DMLogger.log(
+            "addImageAttachment: id=\(attachment.id) displayName=\(attachment.displayName)",
+            name: "AiChatViewModel"
+        )
+    }
+
+    /// 移除指定图片附件。
+    func removeImageAttachment(_ id: String) {
+        model.pendingImageAttachments.removeAll { $0.id == id }
+    }
+
+    /// 清空全部待发送图片。
+    func clearImageAttachments() {
+        model.pendingImageAttachments = []
+    }
+
     // MARK: - Voice input
 
     /// 切换麦克风录音状态；识别完成后会自动调用 `sendMessage` 发送文本。
@@ -160,6 +182,10 @@ final class AiChatViewModel: ObservableObject {
         let text = model.inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         // 将引用路径拼接到实际发送的文本中
         let refText = model.referenceText
+        let pendingImages = model.pendingImageAttachments
+        let hasImages = !pendingImages.isEmpty
+        guard (!text.isEmpty || !refText.isEmpty || hasImages), !model.isStreaming else { return }
+
         let fullText: String
         if refText.isEmpty {
             fullText = text
@@ -168,14 +194,14 @@ final class AiChatViewModel: ObservableObject {
         } else {
             fullText = text + " " + refText
         }
-        guard !fullText.isEmpty, !model.isStreaming else { return }
 
-        // 1. 构造用户消息并加入列表
+        // 1. 构造用户消息并加入列表（文本 + 图片附件）
         let userMsg = ChatMessage(
             id: String(Int(Date().timeIntervalSince1970 * 1000)),
             sender: .user,
             text: fullText,
-            timestamp: nowTime()
+            timestamp: nowTime(),
+            imageAttachments: pendingImages
         )
 
         DMLogger.log(
@@ -187,6 +213,7 @@ final class AiChatViewModel: ObservableObject {
         model.messages.append(userMsg)
         model.inputText = ""
         model.selectedReferences = []
+        model.pendingImageAttachments = []
         model.isLoading = true
         model.connectionState = .connecting
         model.errorMessage = nil
@@ -413,6 +440,13 @@ final class AiChatViewModel: ObservableObject {
                 )
             }
 
+            // 后端不保存图片数据，按 user 消息顺序把本地图片附件与后端消息 ID 关联缓存
+            self.syncImageAttachments(
+                localMessages: self.model.messages,
+                syncedMessages: synced,
+                sessionId: sessionId
+            )
+
             await MainActor.run {
                 // 仅更新连接状态，不替换本地消息
                 self.model.connectionState = .idle
@@ -520,6 +554,12 @@ final class AiChatViewModel: ObservableObject {
                 return
             }
 
+            // 诊断：打印每条历史消息的原始字段，确认图片/多模态内容格式
+            for (i, m) in raw!.enumerated() {
+                self.logSessionMessage(m, index: i)
+            }
+
+            let sessionIdForCache = sessionId
             let messages: [ChatMessage] = raw!.map { m in
                 let role = self.castToString(m["role"]) ?? "user"
                 let sender: MessageSender
@@ -531,12 +571,27 @@ final class AiChatViewModel: ObservableObject {
                 let id = self.castToString(m["id"])
                     ?? String(Int(Date().timeIntervalSince1970 * 1000))
                 let content = self.castToString(m["content"]) ?? ""
-                return ChatMessage(
+                var message = ChatMessage(
                     id: id,
                     sender: sender,
                     text: content,
                     timestamp: self.nowTime()
                 )
+                // 后端不保存图片数据，从历史缓存中按消息 ID 还原图片附件
+                if sender == .user, self.isImagePlaceholder(content) {
+                    let attachments = ImageAttachmentCache.shared.attachments(
+                        forSessionId: sessionIdForCache,
+                        messageId: id
+                    )
+                    message.imageAttachments = attachments
+                    // 成功还原图片后再移除占位符；缓存未命中时保留原始文本，避免消息消失
+                    if !attachments.isEmpty {
+                        message.text = content
+                            .replacingOccurrences(of: "[screenshot]", with: "")
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
+                }
+                return message
             }
 
             DMLogger.log(
@@ -562,6 +617,7 @@ final class AiChatViewModel: ObservableObject {
         model.sessionTitle = nil
         model.inputText = ""
         model.selectedReferences = []
+        model.pendingImageAttachments = []
         model.streamingContent = nil
         model.errorMessage = nil
         model.connectionState = .idle
@@ -643,6 +699,25 @@ final class AiChatViewModel: ObservableObject {
         )
         model.workingDirectory = effective
         configWriter.writeTerminalCwd(effective)
+
+        // terminal.cwd 修改后必须重启 Gateway，Hermes 才会重新读取 config.yaml 并生效。
+        Task { @MainActor [weak self] in
+            guard let self = self else { return }
+            let result = await HermesGatewayService.shared.restartGateway(for: self.profile)
+            if result == nil {
+                self.model.errorMessage = "工作区已更新，但 Hermes Gateway 重启失败，新工作区可能未生效"
+                DMLogger.log(
+                    "setWorkingDirectory: Gateway 重启失败 profile=\(self.profile ?? "default")",
+                    name: "AiChatVM"
+                )
+            } else {
+                self.model.errorMessage = nil
+                DMLogger.log(
+                    "setWorkingDirectory: Gateway 重启成功 port=\(result!.port)",
+                    name: "AiChatVM"
+                )
+            }
+        }
     }
 
     // MARK: - Helpers
@@ -674,6 +749,25 @@ final class AiChatViewModel: ObservableObject {
             case .tool:  role = "tool"
             case .pet:   role = "assistant"
             }
+
+            // 用户消息附带图片时，使用 OpenAI 多模态内容数组格式。
+            if role == "user", !m.imageAttachments.isEmpty {
+                DMLogger.log(
+                    "[DEBUG] buildGatewayMessages: user msg id=\(m.id) " +
+                    "images=\(m.imageAttachments.count) textLen=\(m.text.count) " +
+                    "firstImageDataUrlLen=\(m.imageAttachments.first?.dataUrl.count ?? 0)",
+                    name: "AiChatVM"
+                )
+                var parts: [ChatContentPart] = []
+                if !m.text.isEmpty {
+                    parts.append(.text(m.text))
+                }
+                for attachment in m.imageAttachments {
+                    parts.append(.imageUrl(attachment.dataUrl))
+                }
+                return GatewayChatMessage(role: role, parts: parts)
+            }
+
             return GatewayChatMessage(role: role, content: m.text)
         })
 
@@ -707,6 +801,73 @@ final class AiChatViewModel: ObservableObject {
         let f = DateFormatter()
         f.dateFormat = "HH:mm"
         return f.string(from: Date())
+    }
+
+    /// 将本地用户消息的图片附件与后端同步回来的消息 ID 关联并缓存。
+    ///
+    /// Hermes 后端不保存图片数据，只保留 `[screenshot]` 等占位文本。
+    /// 这里按 user 消息出现顺序一一配对，把本地图片附件保存到缓存。
+    private func syncImageAttachments(
+        localMessages: [ChatMessage],
+        syncedMessages: [SyncedMessage],
+        sessionId: String
+    ) {
+        let localUserMessages = localMessages.filter { $0.sender == .user }
+        let syncedUserMessages = syncedMessages.filter { $0.role == "user" }
+        guard !localUserMessages.isEmpty else { return }
+
+        DMLogger.log(
+            "[DEBUG] syncImageAttachments: sessionId=\(sessionId) " +
+            "localUser=\(localUserMessages.count) syncedUser=\(syncedUserMessages.count)",
+            name: "AiChatVM"
+        )
+
+        for (index, local) in localUserMessages.enumerated() {
+            guard index < syncedUserMessages.count else { break }
+            guard !local.imageAttachments.isEmpty else { continue }
+            let synced = syncedUserMessages[index]
+            ImageAttachmentCache.shared.saveAttachments(
+                local.imageAttachments,
+                sessionId: sessionId,
+                messageId: synced.id
+            )
+        }
+    }
+
+    /// 判断后端返回的文本是否包含图片占位符。
+    private func isImagePlaceholder(_ text: String) -> Bool {
+        text.contains("[screenshot]")
+    }
+
+    /// 打印后端返回的单条历史消息原始字段，用于诊断图片/多模态格式。
+    private func logSessionMessage(_ m: [String: Any], index: Int) {
+        let id = self.castToString(m["id"]) ?? "nil"
+        let role = self.castToString(m["role"]) ?? "nil"
+        let content = m["content"]
+        let contentType = String(describing: type(of: content))
+        let contentDesc: String
+        if let arr = content as? [Any] {
+            let parts = arr.enumerated().map { (idx, item) -> String in
+                if let dict = item as? [String: Any] {
+                    return "[\(idx)] dict(keys=\(dict.keys.sorted()))"
+                } else if let str = item as? String {
+                    return "[\(idx)] string(len=\(str.count))"
+                } else {
+                    return "[\(idx)] \(String(describing: type(of: item)))"
+                }
+            }.joined(separator: ", ")
+            contentDesc = "array(count=\(arr.count), parts=[\(parts)])"
+        } else if let str = content as? String {
+            contentDesc = "string(len=\(str.count), preview=\(str.prefix(200)))"
+        } else {
+            contentDesc = "\(contentType): \(String(describing: content).prefix(200))"
+        }
+        DMLogger.log(
+            "[DEBUG] loadSession raw[\(index)] id=\(id) role=\(role) " +
+            "contentType=\(contentType) content=\(contentDesc) " +
+            "allKeys=\(m.keys.sorted())",
+            name: "AiChatVM"
+        )
     }
 
     /// 安全地将任意值转为 String — 对齐 Flutter `_castToString`。
