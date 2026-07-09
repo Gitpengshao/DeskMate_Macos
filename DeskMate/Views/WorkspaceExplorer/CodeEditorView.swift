@@ -15,8 +15,12 @@ struct CodeEditorView: View {
     let fileURL: URL
     @Binding var content: String
     @Binding var isDirty: Bool
+    var baselineContent: String = ""
+    var onViewDiff: (() -> Void)?
+    var onSave: ((String) -> Void)?
 
     @State private var statusMessage: String?
+    @State private var diffGutterCoordinator = DiffGutterCoordinator()
 
     private let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
 
@@ -57,6 +61,31 @@ struct CodeEditorView: View {
             }
 
             Spacer()
+
+            // 查看 Diff 入口
+            if let onViewDiff = onViewDiff {
+                Button(action: onViewDiff) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.left.arrow.right.circle")
+                            .font(.system(size: 10))
+                        Text("Diff")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundColor(Palette.textSecond)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5)
+                            .fill(Palette.bgElevated)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 5)
+                                    .stroke(Palette.border, lineWidth: 1)
+                            )
+                    )
+                }
+                .buttonStyle(.plain)
+                .help("查看 Diff")
+            }
 
             // 文件路径提示
             Text(fileURL.path)
@@ -122,11 +151,23 @@ struct CodeEditorView: View {
                     tabWidth: 4
                 )
             ),
-            state: $editorState
+            state: $editorState,
+            coordinators: [diffGutterCoordinator]
         )
-        .onChange(of: content) { _, _ in
+        .onChange(of: content) { _, newValue in
             isDirty = true
+            DMLogger.log("CodeEditorView content changed: length=\(newValue.count), dirty=\(isDirty)", name: "DiffDebug")
         }
+        .onChange(of: baselineContent) { _, newValue in
+            DMLogger.log("CodeEditorView baselineContent changed: length=\(newValue.count)", name: "DiffDebug")
+            diffGutterCoordinator.setBaseContent(newValue)
+        }
+        .onAppear {
+            DMLogger.log("CodeEditorView appear: baselineLength=\(baselineContent.count)", name: "DiffDebug")
+            diffGutterCoordinator.setBaseContent(baselineContent)
+        }
+        .contentShape(Rectangle())
+        .clipped()
     }
 
     private var detectedLanguage: CodeLanguage {
@@ -172,8 +213,11 @@ struct CodeEditorView: View {
         SimpleCodeEditor(
             text: $content,
             font: font,
-            isDirty: $isDirty
+            isDirty: $isDirty,
+            baselineContent: baselineContent
         )
+        .contentShape(Rectangle())
+        .clipped()
     }
 
     // MARK: - Status bar
@@ -237,6 +281,7 @@ struct CodeEditorView: View {
         do {
             try content.write(to: fileURL, atomically: true, encoding: .utf8)
             isDirty = false
+            onSave?(content)
             statusMessage = "已保存"
             // 2 秒后清除状态消息
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
@@ -257,6 +302,7 @@ private struct SimpleCodeEditor: NSViewRepresentable {
     @Binding var text: String
     let font: NSFont
     @Binding var isDirty: Bool
+    let baselineContent: String
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -281,7 +327,7 @@ private struct SimpleCodeEditor: NSViewRepresentable {
         textView.isAutomaticSpellingCorrectionEnabled = false
         textView.isContinuousSpellCheckingEnabled = false
         textView.drawsBackground = false
-        textView.textContainerInset = NSSize(width: 8, height: 8)
+        textView.textContainerInset = NSSize(width: 12, height: 8)
         textView.minSize = NSSize(width: 0, height: 0)
         textView.maxSize = NSSize(
             width: CGFloat.greatestFiniteMagnitude,
@@ -290,6 +336,12 @@ private struct SimpleCodeEditor: NSViewRepresentable {
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [.width]
+
+        let markerView = EditorDiffGutterView(frame: NSRect(x: 0, y: 0, width: 3, height: textView.bounds.height))
+        markerView.textView = textView
+        markerView.autoresizingMask = [.height]
+        textView.addSubview(markerView)
+        context.coordinator.markerView = markerView
 
         return scrollView
     }
@@ -303,16 +355,26 @@ private struct SimpleCodeEditor: NSViewRepresentable {
             textView.string = newText
             textView.setSelectedRange(selectedRange)
         }
+
+        context.coordinator.updateMarkers(baseline: baselineContent, current: text)
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         private let parent: SimpleCodeEditor
+        var markerView: EditorDiffGutterView?
+
         init(_ parent: SimpleCodeEditor) { self.parent = parent }
 
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             parent.text = textView.string
             parent.isDirty = true
+            updateMarkers(baseline: parent.baselineContent, current: textView.string)
+        }
+
+        func updateMarkers(baseline: String, current: String) {
+            let markers = TextDiffer.lineMarkers(old: baseline, new: current)
+            markerView?.update(markers: markers)
         }
     }
 }

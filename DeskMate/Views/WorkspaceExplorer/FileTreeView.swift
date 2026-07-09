@@ -10,6 +10,7 @@ struct FileTreeView: View {
     let showHidden: Bool
     @Binding var selectedURL: URL?
     let onSelect: (URL) -> Void
+    let onOpenDiff: ((URL) -> Void)?
 
     var body: some View {
         ScrollView {
@@ -19,11 +20,14 @@ struct FileTreeView: View {
                     level: 0,
                     showHidden: showHidden,
                     selectedURL: $selectedURL,
-                    onSelect: onSelect
+                    onSelect: onSelect,
+                    onOpenDiff: onOpenDiff
                 )
             }
         }
-        .scrollIndicators(.visible)
+        .scrollIndicators(.hidden)
+        .scrollClipDisabled(false)
+        .clipped()
     }
 }
 
@@ -35,6 +39,7 @@ private struct TreeNodeView: View {
     let showHidden: Bool
     @Binding var selectedURL: URL?
     let onSelect: (URL) -> Void
+    let onOpenDiff: ((URL) -> Void)?
 
     @State private var isExpanded: Bool = true
 
@@ -52,7 +57,8 @@ private struct TreeNodeView: View {
                     level: level,
                     showHidden: showHidden,
                     selectedURL: $selectedURL,
-                    onSelect: onSelect
+                    onSelect: onSelect,
+                    onOpenDiff: onOpenDiff
                 )
             }
         } else if node.isDirectory {
@@ -83,9 +89,11 @@ private struct TreeNodeView: View {
 
                 Text(node.name)
                     .font(.system(size: 12))
-                    .foregroundColor(Palette.textPrimary)
+                    .foregroundColor(directoryNameColor)
                     .lineLimit(1)
                     .truncationMode(.middle)
+
+                statusIndicator(for: node.aggregatedStatus)
 
                 Spacer()
             }
@@ -112,7 +120,8 @@ private struct TreeNodeView: View {
                         level: level + 1,
                         showHidden: showHidden,
                         selectedURL: $selectedURL,
-                        onSelect: onSelect
+                        onSelect: onSelect,
+                        onOpenDiff: onOpenDiff
                     )
                 }
             }
@@ -133,9 +142,11 @@ private struct TreeNodeView: View {
 
             Text(node.name)
                 .font(.system(size: 12))
-                .foregroundColor(isSelected ? Palette.accent : Palette.textPrimary)
+                .foregroundColor(fileNameColor)
                 .lineLimit(1)
                 .truncationMode(.middle)
+
+            statusIndicator(for: node.status)
 
             Spacer()
         }
@@ -151,8 +162,16 @@ private struct TreeNodeView: View {
             }
         }
         .contextMenu {
+            if let onOpenDiff = onOpenDiff, let url = node.url, FileType.classify(url) == .text {
+                Button("查看 Diff") {
+                    selectedURL = url
+                    onOpenDiff(url)
+                }
+            }
+
             Button("添加到 AI 对话") {
                 guard let url = node.url else { return }
+                selectedURL = url
                 DMLogger.log("Enqueue file: path=\(url.path) isDir=false", name: "FileTreeView")
                 WorkspaceReferenceBridge.shared.enqueue(
                     path: url.path,
@@ -165,6 +184,49 @@ private struct TreeNodeView: View {
     private var isSelected: Bool {
         guard let url = node.url, let selected = selectedURL else { return false }
         return url.path == selected.path
+    }
+
+    private var fileNameColor: Color {
+        if node.status == .deleted {
+            return Palette.textTertiary
+        }
+        return isSelected ? Palette.accent : Palette.textPrimary
+    }
+
+    private var directoryNameColor: Color {
+        return isSelected ? Palette.accent : Palette.textPrimary
+    }
+
+    /// 状态徽标：modified 黄色、added 绿色、deleted 红色、ignored 灰色。
+    private func statusIndicator(for status: WorkspaceFileStatus) -> some View {
+        let color: Color
+        switch status {
+        case .modified:
+            color = Color(red: 1.000, green: 0.600, blue: 0.200)
+        case .added:
+            color = Color(red: 0.290, green: 0.820, blue: 0.420)
+        case .deleted:
+            color = Color(red: 0.960, green: 0.380, blue: 0.380)
+        case .ignored:
+            color = Palette.textTertiary
+        case .unchanged:
+            color = Color.clear
+        }
+
+        return Circle()
+            .fill(color)
+            .frame(width: 6, height: 6)
+            .help(statusHelp(for: status))
+    }
+
+    private func statusHelp(for status: WorkspaceFileStatus) -> String {
+        switch status {
+        case .modified: return "已修改"
+        case .added: return "新增"
+        case .deleted: return "已删除"
+        case .ignored: return "已忽略"
+        case .unchanged: return ""
+        }
     }
 
     /// 根据文件扩展名返回 SF Symbol 图标名。
