@@ -9,10 +9,10 @@ enum WorkspaceFileStatus: Equatable {
     case ignored
 }
 
-/// 计算工作区中文件/目录的变更状态。
+/// 计算工作区中文件/目录的 Git 变更状态。
 ///
 /// - Git 仓库：使用 `git status --porcelain` 的结果。
-/// - 非 Git 仓库：通过比较磁盘内容与 `LocalHistoryStore` 最新快照判断。
+/// - 非 Git 仓库：统一返回 `.unchanged`。
 actor WorkspaceFileStatusProvider {
     static let shared = WorkspaceFileStatusProvider()
 
@@ -26,11 +26,8 @@ actor WorkspaceFileStatusProvider {
         let gitDir = (standardizedWorkspace as NSString).appendingPathComponent(".git")
         let isGitRepo = FileManager.default.fileExists(atPath: gitDir)
 
-        if isGitRepo {
-            return await gitStatus(for: url, in: standardizedWorkspace)
-        } else {
-            return await localStatus(for: url, in: standardizedWorkspace)
-        }
+        guard isGitRepo else { return .unchanged }
+        return await gitStatus(for: url, in: standardizedWorkspace)
     }
 
     /// 批量计算整个工作区的状态。
@@ -39,11 +36,13 @@ actor WorkspaceFileStatusProvider {
         let gitDir = (standardizedWorkspace as NSString).appendingPathComponent(".git")
         let isGitRepo = FileManager.default.fileExists(atPath: gitDir)
 
-        if isGitRepo {
-            return await gitStatuses(in: standardizedWorkspace)
-        } else {
-            return [:] // 非 Git 目录按需单文件计算，避免大目录扫描
-        }
+        guard isGitRepo else { return [:] }
+        return await gitStatuses(in: standardizedWorkspace)
+    }
+
+    /// 清空 Git 状态缓存，通常在文件变更后调用。
+    func invalidateGitCache(for workspace: String) {
+        gitStatusCache.removeValue(forKey: (workspace as NSString).standardizingPath)
     }
 
     // MARK: - Git 状态
@@ -98,36 +97,6 @@ actor WorkspaceFileStatusProvider {
 
         gitStatusCache[workspace] = result
         return result
-    }
-
-    /// 清空 Git 状态缓存，通常在文件变更后调用。
-    func invalidateGitCache(for workspace: String) {
-        gitStatusCache.removeValue(forKey: (workspace as NSString).standardizingPath)
-    }
-
-    // MARK: - 非 Git 本地状态
-
-    private func localStatus(for url: URL, in workspace: String) async -> WorkspaceFileStatus {
-        let relativePath = self.relativePath(for: url, workspace: workspace)
-        guard let relativePath = relativePath else { return .unchanged }
-
-        let fileExists = FileManager.default.fileExists(atPath: url.path)
-        let latestSnapshot = await LocalHistoryStore.shared.latestSnapshot(workspace: workspace, filePath: url.path)
-
-        if !fileExists {
-            return latestSnapshot != nil ? .deleted : .unchanged
-        }
-
-        guard let snapshot = latestSnapshot else {
-            return .unchanged
-        }
-
-        do {
-            let diskContent = try String(contentsOf: url, encoding: .utf8)
-            return diskContent == snapshot.content ? .unchanged : .modified
-        } catch {
-            return .unchanged
-        }
     }
 
     // MARK: - 辅助

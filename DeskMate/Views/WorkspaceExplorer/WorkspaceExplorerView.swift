@@ -49,18 +49,12 @@ struct WorkspaceExplorerView: View {
             }
         }
         .task {
-            await runPeriodicSnapshotLoop()
-        }
-        .task {
             await runStatusRefreshLoop()
         }
         .onDisappear {
             if let monitor = saveKeyMonitor {
                 NSEvent.removeMonitor(monitor)
                 saveKeyMonitor = nil
-            }
-            Task {
-                await LocalHistoryStore.shared.cleanup()
             }
         }
     }
@@ -83,8 +77,7 @@ struct WorkspaceExplorerView: View {
                     node: root,
                     showHidden: showHiddenFiles,
                     selectedURL: $selectedURL,
-                    onSelect: selectFile,
-                    onOpenDiff: openDiffInNewTab
+                    onSelect: selectFile
                 )
                 .id(fileStatusVersion)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -124,9 +117,6 @@ struct WorkspaceExplorerView: View {
 
             Spacer()
 
-            // Git diff 审查入口 — 仅对文本文件且存在 Git 修改时启用
-            viewDiffButton
-
             // 把当前选中的文件/目录推入 AI 对话 — 仅在有选中项时可用
             addToAIButton
 
@@ -141,31 +131,6 @@ struct WorkspaceExplorerView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-    }
-
-    /// 在 Diff 视图中打开当前选中的文本文件。
-    @ViewBuilder
-    private var viewDiffButton: some View {
-        let enabled = canOpenDiff(for: selectedURL)
-        Button(action: openSelectedDiff) {
-            Image(systemName: "arrow.left.arrow.right.circle")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundColor(enabled ? Palette.textPrimary : Palette.textTertiary)
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .help(enabled ? "查看 Diff" : "请选择可 diff 的文本文件")
-    }
-
-    private func canOpenDiff(for url: URL?) -> Bool {
-        guard let url = url else { return false }
-        guard FileType.classify(url) == .text else { return false }
-        return true
-    }
-
-    private func openSelectedDiff() {
-        guard let url = selectedURL, canOpenDiff(for: url) else { return }
-        openDiffInNewTab(url)
     }
 
     /// "添加到 AI 对话" 按钮 — 仅在有选中项时启用。
@@ -236,35 +201,15 @@ struct WorkspaceExplorerView: View {
     @ViewBuilder
     private var content: some View {
         if let active = activeTab {
-            switch active.mode {
-            case .edit:
-                CodeEditorView(
-                    fileURL: active.url,
-                    content: bindingForTab(active).content,
-                    isDirty: bindingForTab(active).isDirty,
-                    baselineContent: active.baselineContent,
-                    onViewDiff: {
-                        self.openDiffInNewTab(active.url)
-                    },
-                    onSave: { _ in
-                        self.saveFile(for: active.url)
-                    }
-                )
-                .id(active.id)
-            case .diff:
-                if let source = diffSource(for: active.url) {
-                    DiffReviewView(
-                        source: source,
-                        fileURL: active.url,
-                        onApply: { finalContent in
-                            self.applyDiffResult(for: active.url, finalContent: finalContent)
-                        }
-                    )
-                    .id(active.id)
-                } else {
-                    diffUnavailablePlaceholder
+            CodeEditorView(
+                fileURL: active.url,
+                content: bindingForTab(active).content,
+                isDirty: bindingForTab(active).isDirty,
+                onSave: { _ in
+                    self.saveFile(for: active.url)
                 }
-            }
+            )
+            .id(active.id)
         } else if let url = selectedURL, FileType.classify(url) == .binary {
             UnsupportedFileView(url: url)
         } else {
@@ -281,22 +226,6 @@ struct WorkspaceExplorerView: View {
                 .font(.system(size: 14))
                 .foregroundColor(Palette.textSecond)
             Text("左侧文件树中点击任意文本/代码文件即可在标签中打开")
-                .font(.system(size: 11))
-                .foregroundColor(Palette.textTertiary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Palette.bgBase)
-    }
-
-    private var diffUnavailablePlaceholder: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "doc.text.badge.xmark")
-                .font(.system(size: 36))
-                .foregroundColor(Palette.textTertiary)
-            Text("无法查看 Diff")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(Palette.textSecond)
-            Text("请先在编辑器中打开该文件，或确认文件可读取")
                 .font(.system(size: 11))
                 .foregroundColor(Palette.textTertiary)
         }
@@ -357,7 +286,6 @@ struct WorkspaceExplorerView: View {
             Binding(
                 get: { openTabs[index].content },
                 set: { newValue in
-                    DMLogger.log("bindingForTab set: id=\(tab.id), oldLength=\(openTabs[index].content.count), newLength=\(newValue.count)", name: "DiffDebug")
                     openTabs[index].content = newValue
                 }
             ),
@@ -472,25 +400,9 @@ struct WorkspaceExplorerView: View {
             content = "// 无法读取文件内容:\(error.localizedDescription)"
         }
 
-        let tab = FileTab(url: url, content: content, baselineContent: content, isDirty: false)
-        DMLogger.log("WorkspaceExplorer openFileInNewTab: url=\(url.lastPathComponent), baselineLength=\(content.count), contentLength=\(content.count)", name: "DiffDebug")
+        let tab = FileTab(url: url, content: content, isDirty: false)
         openTabs.append(tab)
         activeTabId = tab.id
-
-        Task {
-            await LocalHistoryStore.shared.saveSnapshot(
-                workspace: workingDirectory,
-                filePath: url.path,
-                content: content,
-                source: .diskOpen
-            )
-        }
-    }
-
-    /// 保存成功后把当前内容同步为基线。
-    private func updateBaseline(for url: URL) {
-        guard let index = openTabs.firstIndex(where: { $0.url == url && !$0.isDiff }) else { return }
-        openTabs[index].baselineContent = openTabs[index].content
     }
 
     /// 响应 Cmd+S：保存当前活跃文件对应的编辑标签内容。
@@ -499,132 +411,23 @@ struct WorkspaceExplorerView: View {
         saveFile(for: url)
     }
 
-    /// 把指定 URL 的编辑标签内容写入磁盘、更新基线并刷新状态。
+    /// 把指定 URL 的编辑标签内容写入磁盘并刷新状态。
     private func saveFile(for url: URL) {
-        guard let index = openTabs.firstIndex(where: { $0.url == url && !$0.isDiff }) else { return }
+        guard let index = openTabs.firstIndex(where: { $0.url == url }) else { return }
         let content = openTabs[index].content
         do {
             try content.write(to: url, atomically: true, encoding: .utf8)
             openTabs[index].isDirty = false
-            updateBaseline(for: url)
             Task {
-                await LocalHistoryStore.shared.saveSnapshot(
-                    workspace: workingDirectory,
-                    filePath: url.path,
-                    content: content,
-                    source: .save
-                )
                 await refreshFileStatuses()
             }
-            DMLogger.log("saveFile: success, url=\(url.lastPathComponent), length=\(content.count)", name: "DiffDebug")
         } catch {
-            DMLogger.log("saveFile: failed, url=\(url.lastPathComponent), error=\(error.localizedDescription)", name: "DiffDebug")
-        }
-    }
-
-    private func openDiffInNewTab(_ url: URL) {
-        // 若已存在 diff tab，先关闭再重新创建，确保 DiffReviewViewModel 拿到最新的 source。
-        if let existingIndex = openTabs.firstIndex(where: { $0.url == url && $0.isDiff }) {
-            openTabs.remove(at: existingIndex)
-        }
-        let tab = FileTab(url: url, mode: .diff)
-        openTabs.append(tab)
-        activeTabId = tab.id
-        DMLogger.log("openDiffInNewTab recreated diff tab: url=\(url.lastPathComponent)", name: "DiffDebug")
-    }
-
-    /// 为指定文件构造 DiffSource。
-    ///
-    /// - Git 仓库：使用 Git 流程。
-    /// - 非 Git：优先取同 URL 编辑标签的 baseline/content；否则都从磁盘读。
-    private func diffSource(for url: URL) -> DiffSource? {
-        guard FileType.classify(url) == .text else { return nil }
-
-        // 简化策略：若目录下存在 .git 则视为 Git 仓库。
-        let gitDir = (workingDirectory as NSString).appendingPathComponent(".git")
-        let isGitRepo = FileManager.default.fileExists(atPath: gitDir)
-
-        if isGitRepo {
-            return .git(workingDirectory: workingDirectory)
-        }
-
-        if let editTab = openTabs.first(where: { $0.url == url && !$0.isDiff }) {
-            DMLogger.log("WorkspaceExplorer diffSource local(editTab): url=\(url.lastPathComponent), baseLength=\(editTab.baselineContent.count), proposedLength=\(editTab.content.count), isNew=\(editTab.baselineContent.isEmpty && !editTab.content.isEmpty)", name: "DiffDebug")
-            return .local(
-                baseContent: editTab.baselineContent,
-                proposedContent: editTab.content,
-                isNew: editTab.baselineContent.isEmpty && !editTab.content.isEmpty
-            )
-        }
-
-        // 文件未在编辑器中打开：基线与当前内容都读磁盘，diff 为空。
-        let diskContent: String
-        do {
-            diskContent = try String(contentsOf: url, encoding: .utf8)
-        } catch {
-            DMLogger.log("WorkspaceExplorer diffSource failed to read disk: url=\(url.lastPathComponent), error=\(error.localizedDescription)", name: "DiffDebug")
-            return nil
-        }
-        DMLogger.log("WorkspaceExplorer diffSource local(disk): url=\(url.lastPathComponent), length=\(diskContent.count)", name: "DiffDebug")
-        return .local(baseContent: diskContent, proposedContent: diskContent, isNew: false)
-    }
-
-    /// Diff 应用后同步更新编辑标签状态：只把结果写回编辑器 content，不更新基线、不保存磁盘。
-    /// 用户需要手动 Cmd+S 保存；保存时 `updateBaseline` 才会把基线推进到当前内容。
-    private func applyDiffResult(for url: URL, finalContent: String) {
-        if let index = openTabs.firstIndex(where: { $0.url == url && !$0.isDiff }) {
-            openTabs[index].content = finalContent
-            openTabs[index].isDirty = true
-            DMLogger.log("applyDiffResult: updated editor content, isDirty=true, length=\(finalContent.count)", name: "DiffDebug")
-        }
-
-        // 关闭 diff 标签，让用户在编辑器里确认后再 Cmd+S 保存。
-        if let diffIndex = openTabs.firstIndex(where: { $0.url == url && $0.isDiff }) {
-            closeTab(openTabs[diffIndex])
-        }
-
-        Task {
-            await LocalHistoryStore.shared.saveSnapshot(
-                workspace: workingDirectory,
-                filePath: url.path,
-                content: finalContent,
-                source: .diffApply
-            )
-            await self.refreshFileStatuses()
-        }
-
-        // 若最终内容为空且文件已不存在（如拒绝新增文件），关闭 diff 标签与对应编辑标签。
-        if finalContent.isEmpty && !FileManager.default.fileExists(atPath: url.path) {
-            let tabsToClose = openTabs.filter { $0.url == url }
-            for tab in tabsToClose {
-                closeTab(tab)
-            }
+            DMLogger.log("saveFile: failed, url=\(url.lastPathComponent), error=\(error.localizedDescription)", name: "WorkspaceExplorerView")
         }
     }
 
     private var basename: String {
         (workingDirectory as NSString).lastPathComponent
-    }
-
-    // MARK: - 本地历史周期快照
-
-    /// 每 30 秒为 dirty 的编辑标签保存周期快照。
-    private func runPeriodicSnapshotLoop() async {
-        while !Task.isCancelled {
-            try? await Task.sleep(nanoseconds: 30_000_000_000)
-            await savePeriodicSnapshots()
-        }
-    }
-
-    private func savePeriodicSnapshots() async {
-        for tab in openTabs where !tab.isDiff && tab.isDirty {
-            await LocalHistoryStore.shared.saveSnapshot(
-                workspace: workingDirectory,
-                filePath: tab.url.path,
-                content: tab.content,
-                source: .periodic
-            )
-        }
     }
 
     // MARK: - 文件树状态刷新
@@ -645,7 +448,7 @@ struct WorkspaceExplorerView: View {
         await refreshNodeStatuses(root)
 
         // 覆盖 open tabs 状态：dirty 视为 modified，未保存的新文件视为 added。
-        for tab in openTabs where !tab.isDiff {
+        for tab in openTabs {
             guard let node = root.findNode(for: tab.url) else { continue }
             if !FileManager.default.fileExists(atPath: tab.url.path) {
                 node.status = .added

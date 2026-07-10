@@ -10,7 +10,6 @@ struct FileTreeView: View {
     let showHidden: Bool
     @Binding var selectedURL: URL?
     let onSelect: (URL) -> Void
-    let onOpenDiff: ((URL) -> Void)?
 
     var body: some View {
         ScrollView {
@@ -20,8 +19,7 @@ struct FileTreeView: View {
                     level: 0,
                     showHidden: showHidden,
                     selectedURL: $selectedURL,
-                    onSelect: onSelect,
-                    onOpenDiff: onOpenDiff
+                    onSelect: onSelect
                 )
             }
         }
@@ -39,7 +37,6 @@ private struct TreeNodeView: View {
     let showHidden: Bool
     @Binding var selectedURL: URL?
     let onSelect: (URL) -> Void
-    let onOpenDiff: ((URL) -> Void)?
 
     @State private var isExpanded: Bool = true
 
@@ -57,8 +54,7 @@ private struct TreeNodeView: View {
                     level: level,
                     showHidden: showHidden,
                     selectedURL: $selectedURL,
-                    onSelect: onSelect,
-                    onOpenDiff: onOpenDiff
+                    onSelect: onSelect
                 )
             }
         } else if node.isDirectory {
@@ -120,8 +116,7 @@ private struct TreeNodeView: View {
                         level: level + 1,
                         showHidden: showHidden,
                         selectedURL: $selectedURL,
-                        onSelect: onSelect,
-                        onOpenDiff: onOpenDiff
+                        onSelect: onSelect
                     )
                 }
             }
@@ -162,13 +157,6 @@ private struct TreeNodeView: View {
             }
         }
         .contextMenu {
-            if let onOpenDiff = onOpenDiff, let url = node.url, FileType.classify(url) == .text {
-                Button("查看 Diff") {
-                    selectedURL = url
-                    onOpenDiff(url)
-                }
-            }
-
             Button("添加到 AI 对话") {
                 guard let url = node.url else { return }
                 selectedURL = url
