@@ -12,12 +12,14 @@ final class PetViewModel: ObservableObject {
     private let animationManager = PetAnimationManager()
     private let behaviorManager = PetBehaviorManager()
     private var cancellables = Set<AnyCancellable>()
+    private var gatewayStatusCancellable: AnyCancellable?
 
     init() {
         petSize = SettingsManager.shared.petSize
         animationManager.loadSpriteSheets()
         currentFrame = animationManager.currentFrame
         setupBindings()
+        setupGatewayStatusBinding()
         setupSettingsBindings()
     }
 
@@ -38,20 +40,39 @@ final class PetViewModel: ObservableObject {
             if value {
                 self.animationManager.switchToDrag()
             } else {
-                self.animationManager.switchToRun()
+                self.applyDefaultAnimation()
             }
             self.currentFrame = self.animationManager.currentFrame
         }
 
-        behaviorManager.onSleepStateChanged = { [weak self] isSleeping in
+        behaviorManager.onSleepStateChanged = { [weak self] _ in
             guard let self = self else { return }
-            if isSleeping {
-                self.animationManager.switchToSleep()
-            } else {
-                self.animationManager.switchToRun()
-            }
-            self.currentFrame = self.animationManager.currentFrame
+            self.applyDefaultAnimation()
         }
+    }
+
+    private func setupGatewayStatusBinding() {
+        gatewayStatusCancellable = GatewayConnectionManager.shared.$status
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] status in
+                guard let self = self else { return }
+                self.behaviorManager.setGatewayAbnormal(status == .disconnected)
+                if !self.behaviorManager.isDragging {
+                    self.applyDefaultAnimation()
+                }
+            }
+    }
+
+    /// 根据网关状态与睡眠状态切回默认动画（拖拽状态需由调用方自行保持 drag）。
+    private func applyDefaultAnimation() {
+        if GatewayConnectionManager.shared.status == .disconnected {
+            animationManager.switchToSick()
+        } else if behaviorManager.isSleeping {
+            animationManager.switchToSleep()
+        } else {
+            animationManager.switchToRun()
+        }
+        currentFrame = animationManager.currentFrame
     }
 
     func configure(with window: NSWindow) {
@@ -65,20 +86,18 @@ final class PetViewModel: ObservableObject {
         behaviorManager.stopAllTimers()
     }
 
-    /// 重置拖拽状态，确保动画回到 run
+    /// 重置拖拽状态，根据当前状态切回默认动画
     func resetDragState() {
         behaviorManager.resetDragState()
-        animationManager.resetToRun()
         isDragging = false
-        currentFrame = animationManager.currentFrame
+        applyDefaultAnimation()
     }
 
     /// 唤醒睡眠中的桌宠（双击触发）
     func wakeUp() {
         if behaviorManager.isSleeping {
             behaviorManager.wakeUp()
-            animationManager.switchToRun()
-            currentFrame = animationManager.currentFrame
+            applyDefaultAnimation()
         }
     }
 
@@ -93,8 +112,7 @@ final class PetViewModel: ObservableObject {
         behaviorManager.wakeUp()
         behaviorManager.startWalking()
         isDragging = false
-        animationManager.switchToRun()
-        currentFrame = animationManager.currentFrame
+        applyDefaultAnimation()
     }
 
     // MARK: - Settings Bindings

@@ -5,6 +5,8 @@ struct SpriteSheetConfig {
     let columns: Int
     let totalFrames: Int
     let frameSize: CGFloat
+    /// 源图中每一帧的真实像素尺寸。如果为 nil，则按图片总宽高除以行列数自动计算。
+    let sourceFrameSize: CGSize?
 }
 
 enum PetAnimation {
@@ -17,6 +19,8 @@ enum PetAnimation {
     case idle
     case walk
     case workAtDesk
+    case listen
+    case sick
 
     var config: SpriteSheetConfig {
         switch self {
@@ -29,6 +33,8 @@ enum PetAnimation {
         case .idle:  return SpriteSheets.idle
         case .walk:  return SpriteSheets.walk
         case .workAtDesk: return SpriteSheets.workAtDesk
+        case .listen: return SpriteSheets.listen
+        case .sick:   return SpriteSheets.sick
         }
     }
 }
@@ -38,63 +44,88 @@ enum SpriteSheets {
         imageName: "run",
         columns: 6,
         totalFrames: 21,
-        frameSize: 180
+        frameSize: 180,
+        sourceFrameSize: nil
     )
 
     static let drag = SpriteSheetConfig(
         imageName: "drag",
         columns: 6,
         totalFrames: 26,
-        frameSize: 180
+        frameSize: 180,
+        sourceFrameSize: nil
     )
 
     static let think = SpriteSheetConfig(
         imageName: "think",
         columns: 6,
         totalFrames: 41,
-        frameSize: 90
+        frameSize: 90,
+        sourceFrameSize: nil
     )
 
     static let work = SpriteSheetConfig(
         imageName: "work",
         columns: 6,
         totalFrames: 30,
-        frameSize: 90
+        frameSize: 90,
+        sourceFrameSize: nil
     )
 
     static let sleep = SpriteSheetConfig(
         imageName: "sleep",
         columns: 6,
         totalFrames: 34,
-        frameSize: 180
+        frameSize: 180,
+        sourceFrameSize: nil
     )
 
     static let leave = SpriteSheetConfig(
         imageName: "leave",
         columns: 6,
         totalFrames: 42,
-        frameSize: 180
+        frameSize: 180,
+        sourceFrameSize: nil
     )
 
     static let idle = SpriteSheetConfig(
         imageName: "idle",
         columns: 6,
         totalFrames: 36,
-        frameSize: 180
+        frameSize: 180,
+        sourceFrameSize: nil
     )
 
     static let walk = SpriteSheetConfig(
         imageName: "walk",
         columns: 6,
         totalFrames: 30,
-        frameSize: 180
+        frameSize: 180,
+        sourceFrameSize: CGSize(width: 180, height: 189)
     )
 
     static let workAtDesk = SpriteSheetConfig(
         imageName: "workAtDesk",
         columns: 6,
         totalFrames: 24,
-        frameSize: 180
+        frameSize: 180,
+        sourceFrameSize: nil
+    )
+
+    static let listen = SpriteSheetConfig(
+        imageName: "listen",
+        columns: 6,
+        totalFrames: 39,
+        frameSize: 180,
+        sourceFrameSize: nil
+    )
+
+    static let sick = SpriteSheetConfig(
+        imageName: "sick",
+        columns: 6,
+        totalFrames: 37,
+        frameSize: 180,
+        sourceFrameSize: nil
     )
 
     static let frameSize: CGFloat = 180

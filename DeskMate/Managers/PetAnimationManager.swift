@@ -3,11 +3,15 @@ import AppKit
 final class PetAnimationManager {
     private var runFrames: [NSImage] = []
     private var dragFrames: [NSImage] = []
+    private var thinkFrames: [NSImage] = []
+    private var workFrames: [NSImage] = []
     private var sleepFrames: [NSImage] = []
     private var leaveFrames: [NSImage] = []
     private var idleFrames: [NSImage] = []
     private var walkFrames: [NSImage] = []
     private var workAtDeskFrames: [NSImage] = []
+    private var listenFrames: [NSImage] = []
+    private var sickFrames: [NSImage] = []
     private var currentFrameIndex: Int = 0
     private var animTick: Int = 0
     private let animSpeedDivider: Int = 3
@@ -18,48 +22,18 @@ final class PetAnimationManager {
     // MARK: - Sprite Sheet Loading
 
     func loadSpriteSheets() {
-        runFrames = sliceSpriteSheet(config: SpriteSheets.run)
-        dragFrames = sliceSpriteSheet(config: SpriteSheets.drag)
-        sleepFrames = sliceSpriteSheet(config: SpriteSheets.sleep)
-        leaveFrames = sliceSpriteSheet(config: SpriteSheets.leave)
-        idleFrames = sliceSpriteSheet(config: SpriteSheets.idle)
-        walkFrames = sliceSpriteSheet(config: SpriteSheets.walk)
-        workAtDeskFrames = sliceSpriteSheet(config: SpriteSheets.workAtDesk)
+        runFrames = SpriteSheetSlicer.sliceSpriteSheet(config: SpriteSheets.run)
+        dragFrames = SpriteSheetSlicer.sliceSpriteSheet(config: SpriteSheets.drag)
+        thinkFrames = SpriteSheetSlicer.sliceSpriteSheet(config: SpriteSheets.think)
+        workFrames = SpriteSheetSlicer.sliceSpriteSheet(config: SpriteSheets.work)
+        sleepFrames = SpriteSheetSlicer.sliceSpriteSheet(config: SpriteSheets.sleep)
+        leaveFrames = SpriteSheetSlicer.sliceSpriteSheet(config: SpriteSheets.leave)
+        idleFrames = SpriteSheetSlicer.sliceSpriteSheet(config: SpriteSheets.idle)
+        walkFrames = SpriteSheetSlicer.sliceSpriteSheet(config: SpriteSheets.walk)
+        workAtDeskFrames = SpriteSheetSlicer.sliceSpriteSheet(config: SpriteSheets.workAtDesk)
+        listenFrames = SpriteSheetSlicer.sliceSpriteSheet(config: SpriteSheets.listen)
+        sickFrames = SpriteSheetSlicer.sliceSpriteSheet(config: SpriteSheets.sick)
         currentFrame = runFrames.first
-    }
-
-    private func sliceSpriteSheet(config: SpriteSheetConfig) -> [NSImage] {
-        guard let image = NSImage(named: config.imageName) else {
-            print("Warning: \(config.imageName).png not found in assets")
-            return []
-        }
-
-        var frames: [NSImage] = []
-        let rows = (config.totalFrames + config.columns - 1) / config.columns
-
-        for i in 0..<config.totalFrames {
-            let col = i % config.columns
-            let row = i / config.columns
-
-            // NSImage coordinate system: (0,0) is bottom-left
-            // Sprite sheet rows go top-to-bottom
-            let srcY = CGFloat(rows - 1 - row) * config.frameSize
-            let srcX = CGFloat(col) * config.frameSize
-            let rect = NSRect(x: srcX, y: srcY, width: config.frameSize, height: config.frameSize)
-
-            let frameImage = NSImage(size: NSSize(width: config.frameSize, height: config.frameSize))
-            frameImage.lockFocus()
-            image.draw(
-                in: NSRect(x: 0, y: 0, width: config.frameSize, height: config.frameSize),
-                from: rect,
-                operation: .copy,
-                fraction: 1.0
-            )
-            frameImage.unlockFocus()
-            frames.append(frameImage)
-        }
-
-        return frames
     }
 
     // MARK: - Animation Tick
@@ -76,12 +50,15 @@ final class PetAnimationManager {
         switch currentAnimation {
         case .run:   frames = runFrames
         case .drag:  frames = dragFrames
+        case .think: frames = thinkFrames
+        case .work:  frames = workFrames
         case .sleep: frames = sleepFrames
         case .leave: frames = leaveFrames
         case .idle:  frames = idleFrames
         case .walk:  frames = walkFrames
         case .workAtDesk: frames = workAtDeskFrames
-        case .think, .work: frames = runFrames
+        case .listen: frames = listenFrames
+        case .sick:   frames = sickFrames
         }
         guard !frames.isEmpty else { return }
         currentFrameIndex = (currentFrameIndex + 1) % frames.count
@@ -102,6 +79,20 @@ final class PetAnimationManager {
         currentFrameIndex = 0
         animTick = 0
         currentFrame = dragFrames.first
+    }
+
+    func switchToThink() {
+        currentAnimation = .think
+        currentFrameIndex = 0
+        animTick = 0
+        currentFrame = thinkFrames.first
+    }
+
+    func switchToWork() {
+        currentAnimation = .work
+        currentFrameIndex = 0
+        animTick = 0
+        currentFrame = workFrames.first
     }
 
     func switchToSleep() {
@@ -137,6 +128,20 @@ final class PetAnimationManager {
         currentFrameIndex = 0
         animTick = 0
         currentFrame = workAtDeskFrames.first
+    }
+
+    func switchToListen() {
+        currentAnimation = .listen
+        currentFrameIndex = 0
+        animTick = 0
+        currentFrame = listenFrames.first
+    }
+
+    func switchToSick() {
+        currentAnimation = .sick
+        currentFrameIndex = 0
+        animTick = 0
+        currentFrame = sickFrames.first
     }
 
     // MARK: - State Reset (kept for backward compatibility)

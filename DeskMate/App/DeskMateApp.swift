@@ -278,7 +278,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await MainActor.run {
                 if started {
                     NSLog("[AppDelegate] Hermes Gateway 启动成功")
-                    Task { await GatewayConnectionManager.shared.refresh() }
                 } else {
                     NSLog("[AppDelegate] Hermes Gateway 启动失败")
                     self.gatewayStarted = false
@@ -288,6 +287,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         UserDefaults.standard.set(false, forKey: "onboarding_completed")
                     }
                 }
+                Task { await GatewayConnectionManager.shared.refresh() }
             }
         }
     }

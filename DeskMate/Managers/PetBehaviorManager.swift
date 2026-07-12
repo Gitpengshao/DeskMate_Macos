@@ -23,6 +23,7 @@ final class PetBehaviorManager {
     private let sleepTickThreshold: Int = 600  // ~10s @ 60fps
 
     private(set) var isSleeping = false
+    private(set) var isGatewayAbnormal = false
 
     weak var window: NSWindow?
 
@@ -43,6 +44,9 @@ final class PetBehaviorManager {
 
         // 睡眠中不可移动
         if isSleeping { return }
+
+        // 网关异常时不可移动
+        if isGatewayAbnormal { return }
 
         // 计数行走 tick（不拖拽时才累计）
         if !isDragging {
@@ -97,6 +101,11 @@ final class PetBehaviorManager {
         isSleeping = true
         walkTickCount = 0
         onSleepStateChanged?(true)
+    }
+
+    /// 设置网关异常状态：异常时停止自动移动与进入睡眠。
+    func setGatewayAbnormal(_ value: Bool) {
+        isGatewayAbnormal = value
     }
 
     // MARK: - Mouse Drag Handling
