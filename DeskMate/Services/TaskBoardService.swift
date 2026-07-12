@@ -2,16 +2,11 @@ import Foundation
 
 /// 任务看板服务 — 封装 `hermes kanban ...` CLI 调用。
 ///
-/// 严格对齐 Flutter `HermesService.getKanbanBoards / getKanbanTasks /
-/// createKanbanBoard / deleteKanbanBoard / createKanbanTask /
-/// updateKanbanTask / addKanbanComment / createKanbanLink`：
-///
 /// - Hermes Gateway **不**暴露 Kanban REST 端点，所有读写都走 `hermes kanban` CLI
 /// - 优先解析 `--json` 结构化输出；fallback 解析文本表格
 /// - boards 列表在 CLI 失败时还能从 `~/.hermes/kanban/boards/<slug>/` 文件系统兜底扫描
 ///
-/// 与 `SkillInstallService` 一样以 `nonisolated` 异步子进程方式执行；
-/// ViewModel 在 `@MainActor` 上聚合结果。
+/// 以 `nonisolated` 异步子进程方式执行；ViewModel 在 `@MainActor` 上聚合结果。
 nonisolated final class TaskBoardService {
 
     /// 单例 — UI 多次调用共享同一份 CLI 路径解析。
@@ -30,7 +25,7 @@ nonisolated final class TaskBoardService {
 
     // ---- Boards ----
 
-    /// 列出所有看板 — 对齐 Flutter `getKanbanBoards`。
+    /// 列出所有看板。
     ///
     /// 策略 1: `hermes kanban boards list --json`
     /// 策略 2: 解析 CLI 表格输出
@@ -88,7 +83,7 @@ nonisolated final class TaskBoardService {
         return listBoardsFromFilesystem()
     }
 
-    /// 创建看板 — 对齐 Flutter `createKanbanBoard`。
+    /// 创建看板。
     ///
     /// 运行 `hermes kanban boards create <slug> --name <name> [--description ...] [--icon ...] [--switch]`
     /// 然后重新拉取列表以拿到真实数据。
@@ -173,7 +168,7 @@ nonisolated final class TaskBoardService {
         return slug.unicodeScalars.allSatisfy { allowed.contains($0) }
     }
 
-    /// 删除（归档）看板 — 对齐 Flutter `deleteKanbanBoard`。
+    /// 删除（归档）看板。
     @discardableResult
     func deleteKanbanBoard(slug: String) async -> Bool {
         await runKanbanCli(args: ["boards", "rm", slug], timeout: writeTimeout)
@@ -185,9 +180,9 @@ nonisolated final class TaskBoardService {
 
     // ---- Tasks ----
 
-    /// 列出某看板的所有任务 — 对齐 Flutter `getKanbanTasks`。
+    /// 列出某看板的所有任务。
     ///
-    /// 返回 `{ "data": [Task, ...] }` 的结构，兼容 Flutter 端调用方。
+    /// 返回 `{ "data": [Task, ...] }` 的结构。
     func getKanbanTasks(boardSlug: String) async -> [String: Any]? {
         DMLogger.log(
             "[getKanbanTasks] START boardSlug=\"\(boardSlug)\"",
@@ -230,7 +225,7 @@ nonisolated final class TaskBoardService {
         return nil
     }
 
-    /// 创建任务 — 对齐 Flutter `createKanbanTask`。
+    /// 创建任务。
     ///
     /// 运行 `hermes kanban create <title> --json ...` 并解析返回值。
     /// 失败时回退到重新拉取任务列表按 title 匹配。
@@ -363,7 +358,7 @@ nonisolated final class TaskBoardService {
     ) async -> Bool {
         guard let status = body["status"] as? String else {
             // title / body / assignee / priority / workspace / tenant 字段
-            // Hermes CLI 当前不直接支持,仍以成功返回(对齐 Flutter 行为)
+            // Hermes CLI 当前不直接支持,仍以成功返回。
             DMLogger.log(
                 "[updateKanbanTask] non-status update for \(taskId) (CLI unsupported) → noop",
                 name: "TaskBoardService"
@@ -538,7 +533,7 @@ nonisolated final class TaskBoardService {
         return out != nil
     }
 
-    /// 添加评论 — 对齐 Flutter `addKanbanComment`。
+    /// 添加评论。
     @discardableResult
     func addKanbanComment(
         taskId: String,
@@ -552,10 +547,10 @@ nonisolated final class TaskBoardService {
         return result as? [String: Any]
     }
 
-    /// 创建任务依赖（parent → child） — 对齐 Flutter `createKanbanLink`。
+    /// 创建任务依赖（parent → child）。
     @discardableResult
     func createKanbanLink(body: [String: Any]) async -> [String: Any]? {
-        // Flutter 端使用 snake_case，与 CLI --parent-id / --child-id 命名一致
+        // 兼容 snake_case / camelCase 两种 key，与 CLI --parent-id / --child-id 命名一致
         let parentId = (body["parent_id"] as? String) ?? (body["parentId"] as? String) ?? ""
         let childId = (body["child_id"] as? String) ?? (body["childId"] as? String) ?? ""
         guard !parentId.isEmpty, !childId.isEmpty else { return nil }
@@ -730,7 +725,7 @@ nonisolated final class TaskBoardService {
 
     // MARK: - Helpers
 
-    /// 解析 CLI 表格输出 — 对齐 Flutter `_parseTableOutput`。
+    /// 解析 CLI 表格输出。
     ///
     /// Hermes 表格样例：
     /// ```
@@ -796,7 +791,7 @@ nonisolated final class TaskBoardService {
         return rows
     }
 
-    /// 把 "P1"/"P2" 转换成 int — 对齐 Flutter `_parseNumericPriority`。
+    /// 把 "P1"/"P2" 转换成 int。
     private func parseNumericPriority(_ priority: String) -> Int? {
         var stripped = priority
         if stripped.hasPrefix("P") || stripped.hasPrefix("p") {
@@ -805,7 +800,7 @@ nonisolated final class TaskBoardService {
         return Int(stripped.trimmingCharacters(in: .whitespaces))
     }
 
-    /// 从文件系统兜底扫描看板 — 对齐 Flutter `_listBoardsFromFilesystem`。
+    /// 从文件系统兜底扫描看板。
     private func listBoardsFromFilesystem() -> [[String: Any]]? {
         let hermesHome = AppConstants.resolveHermesHome()
         let fm = FileManager.default

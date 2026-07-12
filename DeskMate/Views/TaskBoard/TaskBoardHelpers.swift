@@ -12,8 +12,7 @@ struct TBSkillItem: Equatable, Identifiable, Hashable {
 
 // MARK: - Toast
 
-/// 轻量级提示条 — 对应 Flutter 端 SnackBar。
-/// 在窗口底部短暂显示一条文本，无需用户交互，自动淡出。
+/// 轻量级提示条 — 在窗口底部短暂显示一条文本，无需用户交互，自动淡出。
 enum TBToast {
 
     /// 全局单例 holder — 任何 View 都能通过它发送 toast。
@@ -82,7 +81,7 @@ struct TBToastOverlay: View {
 
 // MARK: - New Board Dialog
 
-/// 新建看板对话框 — 对齐 Flutter `_NewBoardDialog`。
+/// 新建看板对话框。
 ///
 /// 字段:
 /// - slug(只允许小写字母数字 + 连字符/下划线,以字母数字开头,1-64 字符)
@@ -398,33 +397,6 @@ struct TBAnimatedCount: View {
     }
 }
 
-// MARK: - Status Indicator
-
-/// 状态圆点指示器(用于列头区分 active / empty)。
-struct TBStatusDot: View {
-    let color: Color
-    var size: CGFloat = 6
-    var pulse: Bool = false
-
-    var body: some View {
-        Circle()
-            .fill(color)
-            .frame(width: size, height: size)
-            .overlay(
-                Circle()
-                    .stroke(color.opacity(0.4), lineWidth: 1)
-                    .scaleEffect(pulse ? 2.2 : 1.0)
-                    .opacity(pulse ? 0 : 0.7)
-                    .animation(
-                        pulse
-                            ? .easeOut(duration: 1.6).repeatForever(autoreverses: false)
-                            : .default,
-                        value: pulse
-                    )
-            )
-    }
-}
-
 // MARK: - Keyboard Hint Chip
 
 /// 键盘快捷键小标签 — 例如 `⌘N`。
@@ -491,5 +463,139 @@ struct TBEmptyHint: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, 12)
+    }
+}
+
+// MARK: - Form Helpers
+
+struct TBFieldLabel: View {
+    let label: String
+    var required: Bool = false
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Text(label)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(TBPalette.textPrimary)
+            if required {
+                Text(TBText.required)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(TBPalette.statusDanger)
+            }
+        }
+    }
+}
+
+struct TBDialogSection<Content: View>: View {
+    let title: String
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Text(title)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(TBPalette.textHeader)
+                    .textCase(.uppercase)
+                    .tracking(0.6)
+                Rectangle()
+                    .fill(TBPalette.divider)
+                    .frame(height: 1)
+            }
+            content()
+        }
+    }
+}
+
+struct TBTextInputField: View {
+    @Binding var text: String
+    let placeholder: String
+    var isMultiline: Bool = false
+
+    var body: some View {
+        if isMultiline {
+            ZStack(alignment: .topLeading) {
+                if text.isEmpty {
+                    Text(placeholder)
+                        .font(.system(size: 13))
+                        .foregroundColor(TBPalette.textMuted)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 12)
+                        .allowsHitTesting(false)
+                }
+                TextEditor(text: $text)
+                    .font(.system(size: 13))
+                    .foregroundColor(TBPalette.textPrimary)
+                    .scrollContentBackground(.hidden)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+            }
+            .frame(height: 88)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(TBPalette.inputBg)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(TBPalette.border, lineWidth: 1)
+            )
+        } else {
+            TextField(placeholder, text: $text)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+                .foregroundColor(TBPalette.textPrimary)
+                .padding(.horizontal, 12)
+                .frame(height: 36)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(TBPalette.inputBg)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(TBPalette.border, lineWidth: 1)
+                )
+        }
+    }
+}
+
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+    var runSpacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let result = FlowResult(in: proposal.width ?? 0, subviews: subviews, spacing: spacing, runSpacing: runSpacing)
+        return result.size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let result = FlowResult(in: bounds.width, subviews: subviews, spacing: spacing, runSpacing: runSpacing)
+        for (index, subview) in subviews.enumerated() {
+            subview.place(at: CGPoint(x: bounds.minX + result.positions[index].x,
+                                      y: bounds.minY + result.positions[index].y),
+                          proposal: .unspecified)
+        }
+    }
+
+    struct FlowResult {
+        var size: CGSize = .zero
+        var positions: [CGPoint] = []
+
+        init(in maxWidth: CGFloat, subviews: Subviews, spacing: CGFloat, runSpacing: CGFloat) {
+            var x: CGFloat = 0
+            var y: CGFloat = 0
+            var lineHeight: CGFloat = 0
+            for subview in subviews {
+                let size = subview.sizeThatFits(.unspecified)
+                if x + size.width > maxWidth, x > 0 {
+                    x = 0
+                    y += lineHeight + runSpacing
+                    lineHeight = 0
+                }
+                positions.append(CGPoint(x: x, y: y))
+                lineHeight = max(lineHeight, size.height)
+                x += size.width + spacing
+            }
+            self.size = CGSize(width: maxWidth, height: y + lineHeight)
+        }
     }
 }

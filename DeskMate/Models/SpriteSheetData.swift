@@ -13,6 +13,10 @@ enum PetAnimation {
     case think
     case work
     case sleep
+    case leave
+    case idle
+    case walk
+    case workAtDesk
 
     var config: SpriteSheetConfig {
         switch self {
@@ -21,6 +25,10 @@ enum PetAnimation {
         case .think: return SpriteSheets.think
         case .work:  return SpriteSheets.work
         case .sleep: return SpriteSheets.sleep
+        case .leave: return SpriteSheets.leave
+        case .idle:  return SpriteSheets.idle
+        case .walk:  return SpriteSheets.walk
+        case .workAtDesk: return SpriteSheets.workAtDesk
         }
     }
 }
@@ -58,6 +66,34 @@ enum SpriteSheets {
         imageName: "sleep",
         columns: 6,
         totalFrames: 34,
+        frameSize: 180
+    )
+
+    static let leave = SpriteSheetConfig(
+        imageName: "leave",
+        columns: 6,
+        totalFrames: 42,
+        frameSize: 180
+    )
+
+    static let idle = SpriteSheetConfig(
+        imageName: "idle",
+        columns: 6,
+        totalFrames: 36,
+        frameSize: 180
+    )
+
+    static let walk = SpriteSheetConfig(
+        imageName: "walk",
+        columns: 6,
+        totalFrames: 30,
+        frameSize: 180
+    )
+
+    static let workAtDesk = SpriteSheetConfig(
+        imageName: "workAtDesk",
+        columns: 6,
+        totalFrames: 24,
         frameSize: 180
     )
 

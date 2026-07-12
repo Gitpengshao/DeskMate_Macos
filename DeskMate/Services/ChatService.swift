@@ -38,10 +38,14 @@ enum ChatStreamEvent {
     case sessionCreated(String)
     /// 文本增量块。
     case deltaChunk(String)
+    /// 推理/思考过程增量（Hermes `delta.reasoning_content`）。
+    case reasoningChunk(String)
     /// AI 调用工具。
-    case toolCall(name: String, arguments: [String: Any], displayText: String)
+    case toolCall(id: String?, name: String, arguments: [String: Any], displayText: String)
     /// 工具执行进度（Hermes 自定义事件）。
     case toolProgress(ToolProgressEvent)
+    /// 工具角色消息增量（Hermes 可能把 tool 结果以 role=tool 的 SSE 块返回）。
+    case toolResultChunk(String)
     /// 流正常结束。
     case streamCompleted
     /// 流错误。
@@ -398,6 +402,31 @@ final class ChatService {
                 name: "ChatService"
             )
 
+            // 检测 role=tool 的 chunk（Hermes 把 tool 结果以这种形式返回）
+            if let role = delta["role"] as? String, role == "tool" {
+                let contentCandidate = delta["content"] as? String
+                if let content = contentCandidate, !content.isEmpty {
+                    self.receivedContent = true
+                    DMLogger.log(
+                        "processEvent: emitting toolResultChunk len=\(content.count)",
+                        name: "ChatService"
+                    )
+                    onEvent(.toolResultChunk(content))
+                }
+                return
+            }
+
+            // 推理/思考过程增量
+            let reasoningCandidate = delta["reasoning_content"] as? String ?? delta["reasoning"] as? String
+            if let reasoning = reasoningCandidate, !reasoning.isEmpty {
+                self.receivedContent = true
+                DMLogger.log(
+                    "processEvent: emitting reasoningChunk len=\(reasoning.count)",
+                    name: "ChatService"
+                )
+                onEvent(.reasoningChunk(reasoning))
+            }
+
             // 文本增量
             let contentCandidate = delta["content"] as? String
             let contentLen = contentCandidate?.count ?? 0
@@ -419,18 +448,19 @@ final class ChatService {
             if let toolCalls = delta["tool_calls"] as? [[String: Any]], !toolCalls.isEmpty {
                 self.receivedContent = true
                 for tc in toolCalls {
-                    if let fn = tc["function"] as? [String: Any] {
-                        let name = (fn["name"] as? String) ?? "unknown"
-                        let argsStr = (fn["arguments"] as? String) ?? "{}"
-                        var arguments: [String: Any] = ["raw": argsStr]
-                        if let data = argsStr.data(using: .utf8),
-                           let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                            arguments = parsed
+                        if let fn = tc["function"] as? [String: Any] {
+                            let toolCallId = tc["id"] as? String
+                            let name = (fn["name"] as? String) ?? "unknown"
+                            let argsStr = (fn["arguments"] as? String) ?? "{}"
+                            var arguments: [String: Any] = ["raw": argsStr]
+                            if let data = argsStr.data(using: .utf8),
+                               let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                                arguments = parsed
+                            }
+                            let displayText = "🔧 已调用: \(name)(\(argsStr))"
+                            onEvent(.toolCall(id: toolCallId, name: name, arguments: arguments, displayText: displayText))
                         }
-                        let displayText = "🔧 已调用: \(name)(\(argsStr))"
-                        onEvent(.toolCall(name: name, arguments: arguments, displayText: displayText))
                     }
-                }
             }
         } else if eventType == "hermes.tool.progress" {
             // Hermes 自定义工具进度事件：提取结构化字段供 UI 渲染为进度条/芯片。

@@ -1,0 +1,12 @@
+{
+  "images" : [
+    {
+      "filename" : "waterDispenser.png",
+      "idiom" : "universal"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}

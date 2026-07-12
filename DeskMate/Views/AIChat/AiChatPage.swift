@@ -220,6 +220,13 @@ struct AiChatPage: View {
                     }
                 }
             }
+            .onChange(of: chatVM.model.streamingBlocks.count) { _, _ in
+                if isStreaming {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        proxy.scrollTo("streaming", anchor: .bottom)
+                    }
+                }
+            }
             .onChange(of: chatVM.model.toolProgressEvents.count) { _, _ in
                 if isStreaming {
                     withAnimation(.easeOut(duration: 0.2)) {
@@ -265,7 +272,8 @@ struct AiChatPage: View {
                 id: "streaming",
                 sender: .pet,
                 text: chatVM.model.streamingContent ?? "",
-                timestamp: nowTime()
+                timestamp: nowTime(),
+                contentBlocks: chatVM.model.streamingBlocks
             ),
             petEmoji: chatVM.model.petEmoji,
             petNameKey: chatVM.model.petNameKey,

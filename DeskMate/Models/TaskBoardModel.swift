@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - Task Status
 
-/// 任务状态 — 对齐 Flutter `TaskStatus`（Hermes Kanban 生命周期）。
+/// 任务状态（Hermes Kanban 生命周期）。
 ///
 /// `triage → todo → ready → running → done`
 ///                    ↘ blocked → ready (retry) or archived`
@@ -17,7 +17,7 @@ enum TaskStatus: String, Equatable, CaseIterable, Identifiable, Codable {
 
     var id: String { rawValue }
 
-    /// 列头显示标签（与 Flutter `label` getter 保持一致）。
+    /// 列头显示标签。
     var label: String {
         switch self {
         case .triage:   return "Triage"
@@ -43,7 +43,7 @@ enum TaskStatus: String, Equatable, CaseIterable, Identifiable, Codable {
         }
     }
 
-    /// 解析 Hermes CLI 返回的字符串，对齐 Flutter `_parseStatus`。
+    /// 解析 Hermes CLI 返回的字符串。
     static func parse(_ raw: String?) -> TaskStatus {
         switch raw {
         case "triage":   return .triage
@@ -60,7 +60,7 @@ enum TaskStatus: String, Equatable, CaseIterable, Identifiable, Codable {
 
 // MARK: - Task Comment
 
-/// 任务评论（agent 或 human）— 对齐 Flutter `TaskComment`。
+/// 任务评论（agent 或 human）。
 struct TaskComment: Equatable, Identifiable, Codable {
     let id: String
     let taskId: String
@@ -82,7 +82,7 @@ struct TaskComment: Equatable, Identifiable, Codable {
         self.createdAt = createdAt
     }
 
-    /// JSON 序列化 — 对齐 Flutter `TaskComment.toJson`。
+    /// JSON 序列化。
     func toJson() -> [String: Any] {
         let iso = ISO8601DateFormatter()
         return [
@@ -94,7 +94,7 @@ struct TaskComment: Equatable, Identifiable, Codable {
         ]
     }
 
-    /// JSON 反序列化 — 对齐 Flutter `TaskComment.fromJson`。
+    /// JSON 反序列化。
     static func fromJson(_ json: [String: Any]) -> TaskComment {
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -117,7 +117,7 @@ struct TaskComment: Equatable, Identifiable, Codable {
 
 // MARK: - Task Link
 
-/// 任务依赖（parent → child）— 对齐 Flutter `TaskLink`。
+/// 任务依赖（parent → child）。
 struct TaskLink: Equatable, Codable {
     let parentId: String
     let childId: String
@@ -225,7 +225,7 @@ struct TaskRun: Equatable, Identifiable, Codable {
 
 // MARK: - Task Item
 
-/// 任务卡片 — 对齐 Flutter `TaskItem`。
+/// 任务卡片。
 struct TaskItem: Equatable, Identifiable, Codable {
     let id: String
     var title: String
@@ -283,7 +283,7 @@ struct TaskItem: Equatable, Identifiable, Codable {
         self.updatedAt = updatedAt
     }
 
-    /// 创建一个新任务（createdAt = updatedAt = now）— 对齐 Flutter `TaskItem.create`。
+    /// 创建一个新任务（createdAt = updatedAt = now）。
     static func create(
         id: String,
         title: String,
@@ -313,7 +313,7 @@ struct TaskItem: Equatable, Identifiable, Codable {
         )
     }
 
-    /// JSON 序列化 — 对齐 Flutter `TaskItem.toJson`。
+    /// JSON 序列化。
     func toJson() -> [String: Any] {
         let iso = ISO8601DateFormatter()
         return [
@@ -333,7 +333,7 @@ struct TaskItem: Equatable, Identifiable, Codable {
         ]
     }
 
-    /// JSON 反序列化 — 对齐 Flutter `TaskItem.fromJson`，兼容 camelCase / snake_case。
+    /// JSON 反序列化，兼容 camelCase / snake_case。
     static func fromJson(_ json: [String: Any]) -> TaskItem {
         // 解析 comments
         let commentsList: [TaskComment] = {
@@ -405,7 +405,7 @@ struct TaskItem: Equatable, Identifiable, Codable {
         )
     }
 
-    /// 日期解析 — 对齐 Flutter `_parseDate`，支持 ISO 字符串、Unix 时间戳、纯日期。
+    /// 日期解析，支持 ISO 字符串、Unix 时间戳、纯日期。
     private static func parseDate(_ value: Any?) -> Date {
         guard let value = value else { return Date() }
         if let d = value as? Date { return d }
@@ -440,7 +440,7 @@ struct TaskItem: Equatable, Identifiable, Codable {
         return status != .done && status != .archived
     }
 
-    /// 不可变更新 — 对齐 Flutter `copyWith`。
+    /// 不可变更新。
     func updating(
         title: String? = nil,
         body: String? = nil,
@@ -480,7 +480,7 @@ struct TaskItem: Equatable, Identifiable, Codable {
 
 // MARK: - Task Board
 
-/// 看板（项目）— 对齐 Flutter `TaskBoard`。
+/// 看板（项目）。
 struct TaskBoard: Equatable, Identifiable, Codable {
     let id: String
     let slug: String
@@ -508,7 +508,7 @@ struct TaskBoard: Equatable, Identifiable, Codable {
         self.createdAt = createdAt
     }
 
-    /// 创建一个新看板（taskCount = 0, createdAt = now）— 对齐 Flutter `TaskBoard.create`。
+    /// 创建一个新看板（taskCount = 0, createdAt = now）。
     static func create(
         id: String,
         slug: String,
@@ -527,7 +527,7 @@ struct TaskBoard: Equatable, Identifiable, Codable {
         )
     }
 
-    /// JSON 序列化 — 对齐 Flutter `TaskBoard.toJson`。
+    /// JSON 序列化。
     func toJson() -> [String: Any] {
         let iso = ISO8601DateFormatter()
         return [
@@ -541,7 +541,7 @@ struct TaskBoard: Equatable, Identifiable, Codable {
         ]
     }
 
-    /// JSON 反序列化 — 对齐 Flutter `TaskBoard.fromJson`，兼容 camelCase / snake_case。
+    /// JSON 反序列化，兼容 camelCase / snake_case。
     static func fromJson(_ json: [String: Any]) -> TaskBoard {
         let boardId = (json["id"] as? String) ?? (json["slug"] as? String) ?? ""
         let taskCount: Int = {
@@ -570,7 +570,7 @@ struct TaskBoard: Equatable, Identifiable, Codable {
         )
     }
 
-    /// 不可变更新 — 对齐 Flutter `copyWith`。
+    /// 不可变更新。
     func updating(
         slug: String? = nil,
         name: String? = nil,
@@ -592,7 +592,7 @@ struct TaskBoard: Equatable, Identifiable, Codable {
 
 // MARK: - Page State Model
 
-/// 任务看板页的单一状态源 — 对齐 Flutter `TaskBoardModel`。
+/// 任务看板页的单一状态源。
 struct TaskBoardPageModel: Equatable {
     var activeBoardId: String
     var boards: [TaskBoard]
@@ -600,10 +600,10 @@ struct TaskBoardPageModel: Equatable {
     var isLoading: Bool
     var errorMessage: String?
 
-    /// 顶部筛选条件 — 对齐官方顶部筛选栏。
+    /// 顶部筛选条件。
     var filter: TaskBoardFilter
 
-    /// Lanes by profile:Running 列按 profile 分组。默认 true。
+    /// Running 列按 profile 分组。默认 true。
     var lanesByProfile: Bool
 
     /// 当前活跃 board 的 `~/.hermes/kanban/current` slug(若同步成功)。
@@ -652,7 +652,7 @@ struct TaskBoardPageModel: Equatable {
         return map
     }
 
-    /// 应用顶部筛选 — 对齐官方 `kanban_list` 过滤。
+    /// 应用顶部筛选。
     func applyFilter(_ input: [TaskItem]) -> [TaskItem] {
         input.filter { task in
             if !filter.searchKeyword.isEmpty {
@@ -672,18 +672,18 @@ struct TaskBoardPageModel: Equatable {
         }
     }
 
-    /// 看板内 6 列 — 对齐官方:从左到右 Triage / Todo / Ready / In progress / Blocked / Done。
+    /// 看板内 6 列:从左到右 Triage / Todo / Ready / In progress / Blocked / Done。
     static let kanbanColumns: [TaskStatus] = [
         .triage, .todo, .ready, .running, .blocked, .done,
     ]
 
-    /// Running 列按 profile 分组(若开启) — 对齐官方 `Lanes by profile`。
+    /// Running 列按 profile 分组(若开启)。
     func lanesByProfile(forRunning tasks: [TaskItem]) -> [(String, [TaskItem])] {
         let grouped = Dictionary(grouping: tasks, by: { $0.assignee.isEmpty ? "_unassigned" : $0.assignee })
         return grouped.sorted { $0.key < $1.key }.map { ($0.key, $0.value) }
     }
 
-    /// 不可变更新 — 对齐 Flutter `copyWith`。
+    /// 不可变更新。
     func updating(
         activeBoardId: String? = nil,
         boards: [TaskBoard]? = nil,
@@ -710,7 +710,7 @@ struct TaskBoardPageModel: Equatable {
 
 // MARK: - Filter
 
-/// 看板筛选条件 — 对齐官方顶部筛选栏(search / tenant / assignee)。
+/// 看板筛选条件(search / tenant / assignee)。
 struct TaskBoardFilter: Equatable {
     var searchKeyword: String = ""
     var tenant: String = ""

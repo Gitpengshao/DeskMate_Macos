@@ -1,7 +1,7 @@
 import SwiftUI
 import Combine
 
-/// 任务看板主页 — 一比一还原 Flutter `TaskBoardPage`（StatefulWidget）。
+/// 任务看板主页：2D 办公室视角查看 Hermes Kanban 任务进度。
 ///
 /// MVVM：
 /// - ViewModel: `TaskBoardViewModel`
@@ -18,13 +18,12 @@ struct TaskBoardPage: View {
     @State private var showSwitchBoardDialog: Bool = false
     @State private var showNewBoardDialog: Bool = false
 
-    /// 真实技能列表(从 SkillScannerService 扫描)
-    @State private var availableSkills: [TBSkillItem] = []
+    /// 当前选中的任务 id（用于从办公桌打开详情弹窗）
+    @State private var selectedTaskId: String? = nil
 
     // MARK: - Init
 
-    init(availableSkills: [TBSkillItem] = []) {
-        self.availableSkills = availableSkills
+    init() {
         _viewModel = StateObject(wrappedValue: TaskBoardViewModel())
     }
 
@@ -36,12 +35,9 @@ struct TaskBoardPage: View {
             TBToastOverlay()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(TBPalette.bgBase)
+        .background(OfficeLayout.bgColor)
         .sheet(isPresented: $showNewTaskDialog) {
-            TBNewTaskDialog(
-                viewModel: viewModel,
-                availableSkills: availableSkills
-            )
+            TBNewTaskDialog(viewModel: viewModel)
         }
         .sheet(isPresented: $showSwitchBoardDialog) {
             TBSwitchBoardDialog(
@@ -52,6 +48,15 @@ struct TaskBoardPage: View {
         }
         .sheet(isPresented: $showNewBoardDialog) {
             TBNewBoardDialog(viewModel: viewModel)
+        }
+        .sheet(isPresented: Binding(
+            get: { selectedTaskId != nil },
+            set: { if !$0 { selectedTaskId = nil } }
+        )) {
+            if let taskId = selectedTaskId,
+               let task = viewModel.model.tasks.first(where: { $0.id == taskId }) {
+                TBTaskDetailPopup(task: task, viewModel: viewModel)
+            }
         }
         // ---- 键盘快捷键 ----
         // ⌘N: 新建任务
@@ -70,13 +75,6 @@ struct TaskBoardPage: View {
                 .opacity(0)
                 .frame(width: 0, height: 0)
         )
-        // ⌘. : Nudge 调度
-        .background(
-            Button("") { Task { await viewModel.nudgeDispatcher() } }
-                .keyboardShortcut(".", modifiers: .command)
-                .opacity(0)
-                .frame(width: 0, height: 0)
-        )
         // ⌘⇧N: 新建看板
         .background(
             Button("") { showNewBoardDialog = true }
@@ -84,77 +82,30 @@ struct TaskBoardPage: View {
                 .opacity(0)
                 .frame(width: 0, height: 0)
         )
-        // ESC: 清除筛选
-        .background(
-            Button("") { viewModel.clearFilter() }
-                .keyboardShortcut(.escape, modifiers: [])
-                .opacity(0)
-                .frame(width: 0, height: 0)
-        )
-        .task {
-            // 启动时拉取真实技能列表
-            let vm = viewModel
-            let skills = await vm.loadAvailableSkills()
-            await MainActor.run {
-                self.availableSkills = skills
-            }
-        }
     }
 
     @ViewBuilder
     private var mainContent: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        ZStack {
+            TaskBoardOfficeView(
+                viewModel: viewModel,
+                selectedTaskId: $selectedTaskId,
+                onNewTask: { showNewTaskDialog = true },
+                onSwitchBoard: { showSwitchBoardDialog = true },
+                onNewBoard: { showNewBoardDialog = true },
+                onRefresh: {
+                    Task { await viewModel.refresh() }
+                },
+                onNudge: {
+                    Task { await viewModel.nudgeDispatcher() }
+                }
+            )
+
             // 错误条
             if let err = viewModel.model.errorMessage, !err.isEmpty {
-                TBErrorBanner(message: err) {
-                    Task { await viewModel.refresh() }
-                }
-            }
-
-            // 加载中
-            if viewModel.model.isLoading {
-                TBLoadingView(title: TBText.loading)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        // Header
-                        TBHeaderRow(
-                            model: viewModel.model,
-                            onSwitchBoard: { showSwitchBoardDialog = true },
-                            onNewTask: { showNewTaskDialog = true },
-                            onNewBoard: { showNewBoardDialog = true },
-                            onRefresh: {
-                                Task { await viewModel.refresh() }
-                            },
-                            onNudge: {
-                                Task { await viewModel.nudgeDispatcher() }
-                            }
-                        )
-                        .padding(.horizontal, 24)
-                        .padding(.top, 20)
-
-                        // Subtitle
-                        Text(TBText.pageSubtitle)
-                            .font(.system(size: 12, weight: .regular))
-                            .foregroundColor(TBPalette.textMuted)
-                            .padding(.horizontal, 24)
-
-                        // Filter bar
-                        TBFilterBar(
-                            filter: viewModel.model.filter,
-                            onFilterChange: { f in viewModel.setFilter(f) },
-                            onClear: { viewModel.clearFilter() }
-                        )
-                        .padding(.horizontal, 24)
-                        .padding(.top, 4)
-
-                        // Kanban columns
-                        TBKanbanColumns(model: viewModel.model, viewModel: viewModel)
-                            .padding(.horizontal, 24)
-                            .padding(.top, 8)
-                            .padding(.bottom, 24)
-                    }
+                VStack {
+                    TBErrorBanner(message: err)
+                    Spacer()
                 }
             }
         }

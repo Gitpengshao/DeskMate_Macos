@@ -3,42 +3,31 @@ import AppKit
 
 // MARK: - New Task Dialog
 
-/// 新建任务对话框 — 对齐 Flutter `_NewTaskDialog`。
+/// 新建任务对话框 — 只保留最核心字段：标题、描述、Agent 下拉。
 struct TBNewTaskDialog: View {
     @ObservedObject var viewModel: TaskBoardViewModel
     @Environment(\.dismiss) private var dismiss
 
     @State private var title: String = ""
     @State private var body_: String = ""
-    @State private var assignee: String = ""
-    @State private var workspace: String = NSHomeDirectory()
-    @State private var branch: String = ""
-    @State private var tenant: String = "default"
-    @State private var maxRetries: String = ""
-    @State private var priority: String = "P2"
-    @State private var status: String = "todo"
-    @State private var skillsInput: String = ""
+    @State private var selectedAgentId: String = ""
 
-    /// 全部可选技能列表 — 通过 SkillManagementViewModel 注入
-    var availableSkills: [TBSkillItem] = []
+    private var selectedAgent: AgentProfile? {
+        viewModel.agentProfiles.first(where: { $0.id == selectedAgentId })
+    }
 
-    /// 优先级候选项 — 对齐 Flutter `_priorityOptions`。
-    private let priorityOptions = ["P0", "P1", "P2", "P3", "P4", "P5"]
-    /// 状态候选项 — 对齐 Flutter `_statusOptions`（CLI 仅支持 blocked / running，todo 为默认）。
-    private let statusOptions: [(String, TaskStatus)] = [
-        ("todo", .todo),
-        ("running", .running),
-        ("blocked", .blocked),
-    ]
+    private var canSubmit: Bool {
+        !title.trimmingCharacters(in: .whitespaces).isEmpty
+            && !selectedAgentId.isEmpty
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header — 顶部独立区域，与正文、操作栏用 Divider 切开
             VStack(alignment: .leading, spacing: 4) {
                 Text(TBText.newTask)
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundColor(TBPalette.textPrimary)
-                Text("填写任务信息后即可在看板中跟踪执行进度")
+                Text("选择一个 Agent 并告诉它要做什么")
                     .font(.system(size: 12))
                     .foregroundColor(TBPalette.textMuted)
             }
@@ -52,112 +41,36 @@ struct TBNewTaskDialog: View {
                 .fill(TBPalette.divider)
                 .frame(height: 1)
 
-            // Scrollable form
-            ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    // 基础信息
-                    TBDialogSection(title: "基础信息") {
-                        VStack(alignment: .leading, spacing: 14) {
-                            VStack(alignment: .leading, spacing: 6) {
-                                TBFieldLabel(label: TBText.taskTitle, required: true)
-                                TBTextInputField(
-                                    text: $title,
-                                    placeholder: "例如：实现登录页 UI",
-                                    isMultiline: false
-                                )
-                            }
-
-                            VStack(alignment: .leading, spacing: 6) {
-                                TBFieldLabel(label: TBText.taskBody, required: false)
-                                TBTextInputField(
-                                    text: $body_,
-                                    placeholder: "补充任务背景、目标与验收标准",
-                                    isMultiline: true
-                                )
-                            }
-
-                            VStack(alignment: .leading, spacing: 6) {
-                                TBFieldLabel(label: TBText.assignee, required: false)
-                                TBTextInputField(
-                                    text: $assignee,
-                                    placeholder: "负责人邮箱或名称",
-                                    isMultiline: false
-                                )
-                            }
-
-                            HStack(alignment: .top, spacing: 14) {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    TBFieldLabel(label: TBText.priority, required: false)
-                                    TBChoicePicker(
-                                        options: priorityOptions,
-                                        selection: $priority
-                                    )
-                                }
-                                VStack(alignment: .leading, spacing: 6) {
-                                    TBFieldLabel(label: TBText.status, required: false)
-                                    TBChoicePicker(
-                                        options: statusOptions.map { $0.0 },
-                                        selection: $status
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // 执行环境
-                    TBDialogSection(title: "执行环境") {
-                        VStack(alignment: .leading, spacing: 14) {
-                            HStack(alignment: .top, spacing: 14) {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    TBFieldLabel(label: TBText.workspace, required: false)
-                                    TBDirectoryPicker(text: $workspace)
-                                }
-                                VStack(alignment: .leading, spacing: 6) {
-                                    TBFieldLabel(label: TBText.branch, required: false)
-                                    TBTextInputField(
-                                        text: $branch,
-                                        placeholder: "main",
-                                        isMultiline: false
-                                    )
-                                }
-                            }
-
-                            VStack(alignment: .leading, spacing: 6) {
-                                TBFieldLabel(label: TBText.tenant, required: false)
-                                TBTextInputField(
-                                    text: $tenant,
-                                    placeholder: "default",
-                                    isMultiline: false
-                                )
-                            }
-
-                            VStack(alignment: .leading, spacing: 6) {
-                                TBFieldLabel(label: TBText.skills, required: false)
-                                TBMultiSkillPicker(
-                                    availableSkills: availableSkills,
-                                    skillsInput: $skillsInput
-                                )
-                            }
-                        }
-                    }
-
-                    // 高级选项
-                    TBDialogSection(title: "高级选项") {
-                        VStack(alignment: .leading, spacing: 14) {
-                            VStack(alignment: .leading, spacing: 6) {
-                                TBFieldLabel(label: TBText.maxRetries, required: false)
-                                TBTextInputField(
-                                    text: $maxRetries,
-                                    placeholder: "3",
-                                    isMultiline: false
-                                )
-                            }
-                        }
-                    }
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 6) {
+                    TBFieldLabel(label: TBText.taskTitle, required: true)
+                    TBTextInputField(
+                        text: $title,
+                        placeholder: "例如：实现登录页 UI",
+                        isMultiline: false
+                    )
                 }
-                .padding(.vertical, 4)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    TBFieldLabel(label: TBText.taskBody, required: false)
+                    TBTextInputField(
+                        text: $body_,
+                        placeholder: "补充任务背景、目标与验收标准",
+                        isMultiline: true
+                    )
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    TBFieldLabel(label: TBText.assignee, required: true)
+                    agentPicker
+                }
+
+                if viewModel.agentProfiles.isEmpty {
+                    Text("尚未创建任何 Agent，请先前往 Agent 管理页面创建。")
+                        .font(.system(size: 12))
+                        .foregroundColor(TBPalette.statusBlock)
+                }
             }
-            .frame(maxHeight: 560)
             .padding(.horizontal, 28)
             .padding(.vertical, 20)
 
@@ -165,21 +78,20 @@ struct TBNewTaskDialog: View {
                 .fill(TBPalette.divider)
                 .frame(height: 1)
 
-            // Action toolbar — 底部固定工具栏，与正文明确分隔
             HStack(spacing: 10) {
                 Spacer()
                 Button(TBText.cancel) { dismiss() }
                     .buttonStyle(TBStatusButtonStyle(color: TBPalette.textMuted))
                 Button(TBText.create) { submit() }
                     .buttonStyle(TBStatusButtonStyle(color: TBPalette.statusComplete))
-                    .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(!canSubmit)
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 16)
             .frame(maxWidth: .infinity, alignment: .trailing)
             .background(TBPalette.bgBase)
         }
-        .frame(width: 560)
+        .frame(width: 420)
         .background(TBPalette.bgBase)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(
@@ -188,31 +100,55 @@ struct TBNewTaskDialog: View {
         )
     }
 
+    private var agentPicker: some View {
+        let profiles = viewModel.agentProfiles
+        return Menu {
+            ForEach(profiles) { profile in
+                Button(profile.displayTitle) {
+                    selectedAgentId = profile.id
+                }
+            }
+        } label: {
+            HStack {
+                Text(selectedAgent?.displayTitle ?? "选择 Agent")
+                    .font(.system(size: 13))
+                    .foregroundColor(
+                        selectedAgent == nil ? TBPalette.textMuted : TBPalette.textPrimary
+                    )
+                Spacer()
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(TBPalette.textMuted)
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 36)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(TBPalette.inputBg)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(TBPalette.border, lineWidth: 1)
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .disabled(profiles.isEmpty)
+    }
+
     private func submit() {
         let trimmedTitle = title.trimmingCharacters(in: .whitespaces)
-        guard !trimmedTitle.isEmpty else { return }
-
-        let statusEnum = statusOptions.first(where: { $0.0 == status })?.1 ?? .todo
-        let skills: [String] = skillsInput
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-        let maxRetriesInt: Int? = maxRetries.trimmingCharacters(in: .whitespaces).isEmpty
-            ? nil
-            : Int(maxRetries.trimmingCharacters(in: .whitespaces))
+        guard !trimmedTitle.isEmpty, let agent = selectedAgent else { return }
 
         Task {
             await viewModel.addTask(
                 trimmedTitle,
-                status: statusEnum,
-                priority: priority,
-                assignee: assignee,
+                status: .todo,
+                priority: "P2",
+                assignee: agent.id,
                 body: body_,
-                workspace: workspace,
-                tenant: tenant,
-                branch: branch,
-                skills: skills,
-                maxRetries: maxRetriesInt
+                workspace: viewModel.defaultWorkspace(for: agent),
+                tenant: "default"
             )
             await MainActor.run { dismiss() }
         }
@@ -397,235 +333,4 @@ struct TBSwitchBoardDialog: View {
     }
 }
 
-// MARK: - Form Helpers
 
-/// 字段标签 — 对齐 Flutter `_FieldLabel`。
-struct TBFieldLabel: View {
-    let label: String
-    var required: Bool = false
-
-    var body: some View {
-        HStack(spacing: 0) {
-            Text(label)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(TBPalette.textPrimary)
-            if required {
-                Text(TBText.required)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(TBPalette.statusDanger)
-            }
-        }
-    }
-}
-
-/// 分组容器 — 用于把表单字段按主题分组，给弹窗增加视觉层次。
-struct TBDialogSection<Content: View>: View {
-    let title: String
-    @ViewBuilder var content: () -> Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Text(title)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(TBPalette.textHeader)
-                    .textCase(.uppercase)
-                    .tracking(0.6)
-                Rectangle()
-                    .fill(TBPalette.divider)
-                    .frame(height: 1)
-            }
-            content()
-        }
-    }
-}
-
-/// 文本输入框 — 单行/多行复用。
-struct TBTextInputField: View {
-    @Binding var text: String
-    let placeholder: String
-    var isMultiline: Bool = false
-
-    var body: some View {
-        if isMultiline {
-            ZStack(alignment: .topLeading) {
-                if text.isEmpty {
-                    Text(placeholder)
-                        .font(.system(size: 13))
-                        .foregroundColor(TBPalette.textMuted)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 12)
-                        .allowsHitTesting(false)
-                }
-                TextEditor(text: $text)
-                    .font(.system(size: 13))
-                    .foregroundColor(TBPalette.textPrimary)
-                    .scrollContentBackground(.hidden)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-            }
-            .frame(height: 88)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(TBPalette.inputBg)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(TBPalette.border, lineWidth: 1)
-            )
-        } else {
-            TextField(placeholder, text: $text)
-                .textFieldStyle(.plain)
-                .font(.system(size: 13))
-                .foregroundColor(TBPalette.textPrimary)
-                .padding(.horizontal, 12)
-                .frame(height: 36)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(TBPalette.inputBg)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(TBPalette.border, lineWidth: 1)
-                )
-        }
-    }
-}
-
-/// 单选下拉 — 对齐 Flutter `Select<String>`。
-struct TBChoicePicker: View {
-    let options: [String]
-    @Binding var selection: String
-
-    var body: some View {
-        Menu {
-            ForEach(options, id: \.self) { opt in
-                Button(opt) { selection = opt }
-            }
-        } label: {
-            HStack {
-                Text(selection)
-                    .font(.system(size: 13))
-                    .foregroundColor(TBPalette.textPrimary)
-                Spacer()
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(TBPalette.textMuted)
-            }
-            .padding(.horizontal, 12)
-            .frame(height: 36)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(TBPalette.inputBg)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(TBPalette.border, lineWidth: 1)
-            )
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize(horizontal: false, vertical: true)
-    }
-}
-
-/// 目录选择器 — 对齐 Flutter `_DirectoryPicker`。
-struct TBDirectoryPicker: View {
-    @Binding var text: String
-
-    var body: some View {
-        Button(action: pickDirectory) {
-            HStack(spacing: 8) {
-                Image(systemName: "folder")
-                    .font(.system(size: 14))
-                    .foregroundColor(TBPalette.textMuted)
-                Text(text.isEmpty ? TBText.selectDirectory : text)
-                    .font(.system(size: 13))
-                    .foregroundColor(
-                        text.isEmpty ? TBPalette.textMuted : TBPalette.textPrimary
-                    )
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Spacer()
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 12))
-                    .foregroundColor(TBPalette.textMuted)
-            }
-            .padding(.horizontal, 12)
-            .frame(height: 36)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(TBPalette.inputBg)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(TBPalette.border, lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func pickDirectory() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.prompt = "选择"
-        panel.message = "选择工作目录"
-        if panel.runModal() == .OK, let url = panel.url {
-            text = url.path
-        }
-    }
-}
-
-/// 技能多选 — 简化版：提供建议 chip + 自由输入，逗号分隔。
-/// Flutter 端是复杂的 `_buildSkillsList`，这里保留等价的可用 UI。
-struct TBMultiSkillPicker: View {
-    let availableSkills: [TBSkillItem]
-    @Binding var skillsInput: String
-
-    private let suggested = ["general", "creative", "apple", "blockchain", "git"]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            TBTextInputField(
-                text: $skillsInput,
-                placeholder: "用逗号分隔，例如: general, creative",
-                isMultiline: false
-            )
-            if !availableSkills.isEmpty {
-                FlowLayout(spacing: 6, runSpacing: 6) {
-                    ForEach(suggested, id: \.self) { s in
-                        Button {
-                            appendSkill(s)
-                        } label: {
-                            Text("+\(s)")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(TBPalette.textMuted)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 4)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .stroke(TBPalette.border, lineWidth: 1)
-                                )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-        }
-    }
-
-    private func appendSkill(_ skill: String) {
-        let list = skillsInput
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-        if list.contains(skill) { return }
-        if skillsInput.isEmpty {
-            skillsInput = skill
-        } else {
-            skillsInput = list.joined(separator: ", ") + ", " + skill
-        }
-    }
-}

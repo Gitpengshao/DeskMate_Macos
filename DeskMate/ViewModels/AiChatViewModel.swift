@@ -31,6 +31,15 @@ final class AiChatViewModel: ObservableObject {
     /// SSE 流缓冲（与 Flutter `_streamBuffer` 等价）。
     private var streamBuffer: String = ""
 
+    /// 流式过程中累积的非文本内容块：toolCall、fileChange、observation。
+    private var streamingToolBlocks: [ContentBlock] = []
+
+    /// 流式中累积的 reasoning 文本（来自 delta.reasoning_content）。
+    private var streamingReasoningBuffer: String = ""
+
+    /// 流式中累积的 role=tool 结果文本（Hermes 可能分段返回）。
+    private var streamingToolResultBuffer: String = ""
+
     /// 灵动岛工作态是否已触发 — 首个 deltaChunk 时设为 true，结束后复位
     private var hasStartedWorking: Bool = false
 
@@ -218,7 +227,11 @@ final class AiChatViewModel: ObservableObject {
         model.connectionState = .connecting
         model.errorMessage = nil
         model.streamingContent = nil
+        model.streamingBlocks = []
         model.toolProgressEvents = []
+        streamingToolBlocks = []
+        streamingReasoningBuffer = ""
+        streamingToolResultBuffer = ""
 
         // 防御性复位工作态 — 避免上一次未正确清理导致重复触发
         hasStartedWorking = false
@@ -265,6 +278,63 @@ final class AiChatViewModel: ObservableObject {
 
     // MARK: - Stream events
 
+    /// 把累积的 role=tool 结果文本解析为 observation / fileChange 块。
+    private func flushToolResultBuffer() {
+        guard !streamingToolResultBuffer.isEmpty else { return }
+        let blocks = ChatContentParser.parseToolMessage(content: streamingToolResultBuffer)
+        streamingToolBlocks.append(contentsOf: blocks)
+        DMLogger.log(
+            "[DEBUG] flushToolResultBuffer: parsed \(blocks.count) blocks from len=\(streamingToolResultBuffer.count)",
+            name: "AiChatVM"
+        )
+        streamingToolResultBuffer = ""
+    }
+
+    /// 根据当前 streamBuffer 与累积的 reasoning / tool 块重建流式内容块。
+    private func rebuildStreamingBlocks() {
+        var allBlocks: [ContentBlock] = []
+
+        if !streamingReasoningBuffer.isEmpty {
+            allBlocks.append(.reasoning(text: streamingReasoningBuffer, isPending: true))
+        }
+
+        let textBlocks = ChatContentParser.parseContentBlocks(
+            from: streamBuffer,
+            streaming: true
+        )
+        allBlocks.append(contentsOf: textBlocks)
+        allBlocks.append(contentsOf: streamingToolBlocks)
+
+        model.streamingBlocks = allBlocks
+        DMLogger.log(
+            "[DEBUG] rebuildStreamingBlocks: bufferLen=\(streamBuffer.count) " +
+            "textBlocks=\(textBlocks.count) toolBlocks=\(streamingToolBlocks.count) " +
+            "total=\(allBlocks.count)",
+            name: "AiChatVM"
+        )
+        for (i, block) in allBlocks.enumerated() {
+            DMLogger.log(
+                "[DEBUG] block[\(i)]: \(blockDescription(block))",
+                name: "AiChatVM"
+            )
+        }
+    }
+
+    private func blockDescription(_ block: ContentBlock) -> String {
+        switch block {
+        case .text(let text):
+            return "text(len=\(text.count))"
+        case .reasoning(let text, let isPending):
+            return "reasoning(pending=\(isPending), len=\(text.count))"
+        case .toolCall(let tc):
+            return "toolCall(\(tc.name), argsLen=\(tc.displayArguments.count))"
+        case .observation(let obs):
+            return "observation(\(obs.toolName), status=\(obs.status.rawValue), textLen=\(obs.text.count))"
+        case .fileChange(let fc):
+            return "fileChange(\(fc.operation.rawValue): \(fc.path))"
+        }
+    }
+
     /// 处理单个流事件 — 对齐 Flutter `_onStreamEvent`。
     private func onStreamEvent(_ event: ChatStreamEvent) {
         switch event {
@@ -272,25 +342,62 @@ final class AiChatViewModel: ObservableObject {
             DMLogger.log("[DEBUG] SessionCreated: \(sessionId)", name: "AiChatVM")
             model.sessionId = sessionId
 
+        case .reasoningChunk(let text):
+            streamingReasoningBuffer.append(text)
+            DMLogger.log(
+                "[DEBUG] ReasoningChunk: len=\(text.count) total=\(streamingReasoningBuffer.count)",
+                name: "AiChatVM"
+            )
+            rebuildStreamingBlocks()
+            model.connectionState = .streaming
+
         case .deltaChunk(let text):
             // 首个 deltaChunk 触发灵动岛工作态（与 think 动画结束同步）
             if !hasStartedWorking {
                 hasStartedWorking = true
                 DynamicNotchManager.shared.startWorking()
             }
+            // 收到 assistant 正文时，先把之前累积的 role=tool 结果 flush 成块
+            flushToolResultBuffer()
             streamBuffer.append(text)
             DMLogger.log(
                 "[DEBUG] DeltaChunk: text=\"\(text)\", buffer length=\(streamBuffer.count)",
                 name: "AiChatVM"
             )
             model.streamingContent = streamBuffer
+            rebuildStreamingBlocks()
             model.connectionState = .streaming
 
-        case .toolCall(_, _, let displayText):
-            DMLogger.log("[DEBUG] ToolCall: \(displayText)", name: "AiChatVM")
-            // 与 Flutter 一致：不插入独立的 tool 消息气泡，
-            // 仅保留 streamingContent 便于流继续拼接。
-            model.streamingContent = streamBuffer
+        case .toolResultChunk(let text):
+            streamingToolResultBuffer.append(text)
+            DMLogger.log(
+                "[DEBUG] ToolResultChunk: len=\(text.count) total=\(streamingToolResultBuffer.count)",
+                name: "AiChatVM"
+            )
+            model.connectionState = .streaming
+
+        case .toolCall(let toolCallId, let name, let arguments, let displayText):
+            DMLogger.log(
+                "[DEBUG] ToolCall: id=\(toolCallId ?? "nil") name=\(name) displayText=\(displayText)",
+                name: "AiChatVM"
+            )
+            let id = toolCallId ?? "\(name)-\(Date().timeIntervalSince1970)"
+            let displayArgs: String
+            if let data = try? JSONSerialization.data(withJSONObject: arguments, options: .sortedKeys),
+               let json = String(data: data, encoding: .utf8) {
+                displayArgs = json
+            } else {
+                displayArgs = String(describing: arguments)
+            }
+            streamingToolBlocks.append(.toolCall(ToolCallBlock(
+                id: id,
+                name: name,
+                arguments: arguments,
+                displayArguments: displayArgs
+            )))
+            let fileChanges = ChatContentParser.detectFileChanges(toolName: name, arguments: arguments)
+            streamingToolBlocks.append(contentsOf: fileChanges.map { .fileChange($0) })
+            rebuildStreamingBlocks()
 
         case .toolProgress(let event):
             DMLogger.log(
@@ -308,6 +415,22 @@ final class AiChatViewModel: ObservableObject {
                 events.append(event)
             }
             model.toolProgressEvents = events
+
+            // 工具完成或失败时生成 observation 块，便于在 assistant 消息内展示结果。
+            if event.status == .completed || event.status == .failed {
+                let observationId = event.toolCallId ?? event.id
+                streamingToolBlocks.removeAll { block in
+                    if case .observation(let obs) = block, obs.id == observationId { return true }
+                    return false
+                }
+                streamingToolBlocks.append(.observation(ObservationBlock(
+                    id: observationId,
+                    toolName: event.tool,
+                    text: event.label,
+                    status: event.status
+                )))
+                rebuildStreamingBlocks()
+            }
             model.connectionState = .streaming
 
         case .streamCompleted:
@@ -356,24 +479,44 @@ final class AiChatViewModel: ObservableObject {
             )
         }
 
+        // 组装最终 assistant 消息的内容块
+        // 流式末尾可能没有后续 delta，先把累积的 role=tool 结果 flush 成块
+        flushToolResultBuffer()
+
+        var finalContentBlocks: [ContentBlock] = []
+        if !streamingReasoningBuffer.isEmpty {
+            finalContentBlocks.append(.reasoning(text: streamingReasoningBuffer, isPending: false))
+        }
+        let finalTextBlocks = ChatContentParser.parseContentBlocks(
+            from: fullContent,
+            streaming: false
+        )
+        finalContentBlocks.append(contentsOf: finalTextBlocks)
+        finalContentBlocks.append(contentsOf: streamingToolBlocks)
+
         // 加入助手消息
         let assistantMsg = ChatMessage(
             id: "\(Int(Date().timeIntervalSince1970 * 1000))_pet",
             sender: .pet,
             text: fullContent.isEmpty ? "..." : fullContent,
-            timestamp: nowTime()
+            timestamp: nowTime(),
+            contentBlocks: finalContentBlocks
         )
 
         DMLogger.log(
             "[DEBUG] _onStreamDone: adding assistantMsg id=\(assistantMsg.id), " +
-            "text length=\(assistantMsg.text.count)",
+            "text length=\(assistantMsg.text.count), blocks=\(finalContentBlocks.count)",
             name: "AiChatVM"
         )
 
         model.messages.append(assistantMsg)
 
         model.streamingContent = nil
+        model.streamingBlocks = []
         model.toolProgressEvents = []
+        streamingToolBlocks = []
+        streamingReasoningBuffer = ""
+        streamingToolResultBuffer = ""
         model.isLoading = false
         model.connectionState = .completed
 
@@ -490,22 +633,27 @@ final class AiChatViewModel: ObservableObject {
 
         let partialContent = streamBuffer
         if !partialContent.isEmpty {
+            let partialBlocks = ChatContentParser.parseContentBlocks(from: partialContent, streaming: false)
+                + streamingToolBlocks
             let assistantMsg = ChatMessage(
                 id: "\(Int(Date().timeIntervalSince1970 * 1000))_pet",
                 sender: .pet,
                 text: partialContent,
-                timestamp: nowTime()
+                timestamp: nowTime(),
+                contentBlocks: partialBlocks
             )
             model.messages.append(assistantMsg)
             DMLogger.log(
                 "[DEBUG] stopStream: preserved partial message, " +
-                "text length=\(assistantMsg.text.count)",
+                "text length=\(assistantMsg.text.count), blocks=\(partialBlocks.count)",
                 name: "AiChatVM"
             )
         }
 
         model.streamingContent = nil
+        model.streamingBlocks = []
         model.toolProgressEvents = []
+        streamingToolBlocks = []
         model.isLoading = false
         model.connectionState = .idle
         streamBuffer = ""
@@ -560,7 +708,7 @@ final class AiChatViewModel: ObservableObject {
             }
 
             let sessionIdForCache = sessionId
-            let messages: [ChatMessage] = raw!.map { m in
+            var messages: [ChatMessage] = raw!.map { m in
                 let role = self.castToString(m["role"]) ?? "user"
                 let sender: MessageSender
                 switch role {
@@ -577,6 +725,33 @@ final class AiChatViewModel: ObservableObject {
                     text: content,
                     timestamp: self.nowTime()
                 )
+                switch sender {
+                case .pet:
+                    let reasoning = self.castToString(m["reasoning"])
+                        ?? self.castToString(m["reasoning_content"])
+                        ?? ""
+                    let blocks = ChatContentParser.parseAssistantMessage(
+                        content: content,
+                        reasoning: reasoning,
+                        toolCalls: m["tool_calls"]
+                    )
+                    message.contentBlocks = blocks
+                    DMLogger.log(
+                        "[DEBUG] loadSession parsed assistant message id=\(id) " +
+                        "contentLen=\(content.count) reasoningLen=\(reasoning.count) blocks=\(blocks.count)",
+                        name: "AiChatVM"
+                    )
+                case .tool:
+                    let blocks = ChatContentParser.parseToolMessage(content: content)
+                    message.contentBlocks = blocks
+                    DMLogger.log(
+                        "[DEBUG] loadSession parsed tool message id=\(id) " +
+                        "contentLen=\(content.count) blocks=\(blocks.count)",
+                        name: "AiChatVM"
+                    )
+                case .user:
+                    break
+                }
                 // 后端不保存图片数据，从历史缓存中按消息 ID 还原图片附件
                 if sender == .user, self.isImagePlaceholder(content) {
                     let attachments = ImageAttachmentCache.shared.attachments(
@@ -598,6 +773,9 @@ final class AiChatViewModel: ObservableObject {
                 "[DEBUG] loadSession: loaded \(messages.count) messages for \(sessionId)",
                 name: "AiChatVM"
             )
+
+            // 后端可能不返回 additions/deletions，用历史消息里的 read/write 内容补全
+            ChatContentParser.fillMissingLineCounts(for: &messages)
 
             await MainActor.run {
                 self.model.sessionId = sessionId
@@ -872,9 +1050,11 @@ final class AiChatViewModel: ObservableObject {
 
     /// 安全地将任意值转为 String — 对齐 Flutter `_castToString`。
     ///
-    /// 处理 JSON 解析后 `id` / `role` 等字段可能为 Int / NSNumber 的情况。
+    /// 处理 JSON 解析后 `id` / `role` 等字段可能为 Int / NSNumber 的情况；
+    /// JSON null（NSNull）返回 nil，避免显示成 "nil" 文本。
     private func castToString(_ value: Any?) -> String? {
         guard let value = value else { return nil }
+        if value is NSNull { return nil }
         if let s = value as? String { return s }
         return String(describing: value)
     }

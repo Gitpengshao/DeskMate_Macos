@@ -38,6 +38,78 @@ struct ChatImageAttachment: Identifiable, Equatable, Codable {
     let displayName: String
 }
 
+/// AI 回复内容块的类型 — 参考 hermes-studio ContentBlock 概念，把一次 assistant 消息拆成多段。
+enum ContentBlock: Identifiable, Equatable {
+    /// 普通正文文本（Markdown）。
+    case text(String)
+    /// 思考过程；`isPending` 表示流式中尚未闭合 <think> 标签。
+    case reasoning(text: String, isPending: Bool)
+    /// 工具调用（action）。
+    case toolCall(ToolCallBlock)
+    /// 工具执行结果（observation）。
+    case observation(ObservationBlock)
+    /// 文件改动摘要。
+    case fileChange(FileChangeBlock)
+
+    var id: String {
+        switch self {
+        case .text(let text):
+            return "text-\(text.hashValue)"
+        case .reasoning(let text, let isPending):
+            return "reasoning-\(isPending)-\(text.hashValue)"
+        case .toolCall(let block):
+            return "toolCall-\(block.id)"
+        case .observation(let block):
+            return "observation-\(block.id)"
+        case .fileChange(let block):
+            return "fileChange-\(block.id)"
+        }
+    }
+}
+
+/// 工具调用内容块 —— action。
+struct ToolCallBlock: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let arguments: [String: Any]
+    /// 用于 UI 展示的参数 JSON 字符串。
+    let displayArguments: String
+
+    static func == (lhs: ToolCallBlock, rhs: ToolCallBlock) -> Bool {
+        lhs.id == rhs.id
+        && lhs.name == rhs.name
+        && lhs.displayArguments == rhs.displayArguments
+    }
+}
+
+/// 工具执行结果内容块 —— observation。
+struct ObservationBlock: Identifiable, Equatable {
+    let id: String
+    let toolName: String
+    let text: String
+    let status: ToolProgressStatus
+}
+
+/// 文件改动操作类型。
+enum FileChangeOperation: String, Codable, Equatable {
+    case add
+    case delete
+    case modify
+}
+
+/// 文件改动内容块。
+struct FileChangeBlock: Identifiable, Equatable {
+    let id: String
+    let path: String
+    let operation: FileChangeOperation
+    /// 新增行数（后端提供时展示为 +N）。
+    let additions: Int?
+    /// 删除行数（后端提供时展示为 -N）。
+    let deletions: Int?
+    /// 工具调用参数中的新文件内容，用于在工具结果没有返回行数时本地 diff 计算。
+    let newContent: String?
+}
+
 /// 单条聊天消息 — 对齐 Flutter `ChatMessage`。
 struct ChatMessage: Identifiable, Equatable, Codable {
     let id: String
@@ -47,6 +119,51 @@ struct ChatMessage: Identifiable, Equatable, Codable {
     var toolCall: String? // 例如：'🔧 已调用: weather_search(location="Beijing")'
     /// 用户消息附带的图片（多模态视觉输入）。
     var imageAttachments: [ChatImageAttachment] = []
+    /// assistant 消息的 UI 内容块；不参与持久化，加载时从 `text` 重新解析。
+    var contentBlocks: [ContentBlock] = []
+
+    private enum CodingKeys: String, CodingKey {
+        case id, sender, text, timestamp, toolCall, imageAttachments
+    }
+
+    init(
+        id: String,
+        sender: MessageSender,
+        text: String,
+        timestamp: String,
+        toolCall: String? = nil,
+        imageAttachments: [ChatImageAttachment] = [],
+        contentBlocks: [ContentBlock] = []
+    ) {
+        self.id = id
+        self.sender = sender
+        self.text = text
+        self.timestamp = timestamp
+        self.toolCall = toolCall
+        self.imageAttachments = imageAttachments
+        self.contentBlocks = contentBlocks
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decode(String.self, forKey: .id)
+        self.sender = try container.decode(MessageSender.self, forKey: .sender)
+        self.text = try container.decode(String.self, forKey: .text)
+        self.timestamp = try container.decode(String.self, forKey: .timestamp)
+        self.toolCall = try container.decodeIfPresent(String.self, forKey: .toolCall)
+        self.imageAttachments = try container.decodeIfPresent([ChatImageAttachment].self, forKey: .imageAttachments) ?? []
+        self.contentBlocks = []
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(sender, forKey: .sender)
+        try container.encode(text, forKey: .text)
+        try container.encode(timestamp, forKey: .timestamp)
+        try container.encodeIfPresent(toolCall, forKey: .toolCall)
+        try container.encode(imageAttachments, forKey: .imageAttachments)
+    }
 }
 
 /// AI 对话页面整体状态 — 对齐 Flutter `AiChatModel`。
@@ -80,6 +197,9 @@ struct AiChatModel: Equatable {
 
     /// SSE 流式响应的实时文本片段。
     var streamingContent: String?
+
+    /// 流式回复的 UI 内容块（实时构建）。
+    var streamingBlocks: [ContentBlock] = []
 
     /// 当前流中的工具调用进度列表（Hermes `hermes.tool.progress`）。
     var toolProgressEvents: [ToolProgressEvent] = []

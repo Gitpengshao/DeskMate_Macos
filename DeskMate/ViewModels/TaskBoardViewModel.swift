@@ -1,7 +1,7 @@
 import Foundation
 import Combine
 
-/// 任务看板页 ViewModel — 一比一还原 Flutter `TaskBoardViewModel`（Riverpod Notifier）。
+/// 任务看板页 ViewModel。
 ///
 /// MVVM 单一状态源：所有状态通过 `model: TaskBoardPageModel` 发布；
 /// View 通过 `@Published` 订阅更新。所有 CLI 写入均为异步，最终结果在
@@ -19,11 +19,29 @@ final class TaskBoardViewModel: ObservableObject {
 
     private let service: TaskBoardService
 
+    // MARK: - Agent Profiles
+
+    /// 当前可选的 Hermes profile，供新建任务时选择 Agent。
+    var agentProfiles: [AgentProfile] {
+        AgentViewModel.shared.model.profiles
+    }
+
+    /// 为指定 profile 推断默认工作目录。
+    func defaultWorkspace(for profile: AgentProfile?) -> String {
+        guard let profile else { return NSHomeDirectory() }
+        let fm = FileManager.default
+        // 优先使用 profile 路径本身作为工作区（若存在）
+        if !profile.path.isEmpty, fm.fileExists(atPath: profile.path) {
+            return profile.path
+        }
+        return NSHomeDirectory()
+    }
+
     // MARK: - Init
 
     init(service: TaskBoardService = .shared) {
         self.service = service
-        // 启动时异步加载 — 对齐 Flutter `Future.microtask(() => _fetchFromApi())`。
+        // 启动时异步加载。
         Task { [weak self] in
             await self?.fetchFromApi()
         }
@@ -31,7 +49,7 @@ final class TaskBoardViewModel: ObservableObject {
 
     // MARK: - API Integration
 
-    /// 拉取所有看板与当前活跃看板的任务列表 — 对齐 Flutter `_fetchFromApi`。
+    /// 拉取所有看板与当前活跃看板的任务列表。
     func fetchFromApi() async {
         DMLogger.log(
             "[TaskBoardVM] _fetchFromApi() 开始请求 Gateway API…",
@@ -106,12 +124,12 @@ final class TaskBoardViewModel: ObservableObject {
         }
     }
 
-    /// 刷新数据 — 对齐 Flutter `refresh()`。
+    /// 刷新数据。
     func refresh() async {
         await fetchFromApi()
     }
 
-    /// 加载某 slug 看板的所有任务 — 对齐 Flutter `_loadTasksForBoard`。
+    /// 加载某 slug 看板的所有任务。
     private func loadTasksForBoard(slug: String) async -> [TaskItem] {
         DMLogger.log(
             "[TaskBoardVM] _loadTasksForBoard START boardSlug=\"\(slug)\"",
@@ -156,11 +174,14 @@ final class TaskBoardViewModel: ObservableObject {
 
     // MARK: - Board Operations
 
-    /// 删除（归档）看板 — 对齐 Flutter `deleteBoard`。
+    /// 删除（归档）看板。
     func deleteBoard(_ boardId: String) async {
         guard let board = model.boards.first(where: { $0.id == boardId }),
               !board.id.isEmpty
         else { return }
+
+        model = model.updating(isLoading: true)
+        defer { model = model.updating(isLoading: false) }
 
         // 乐观更新本地状态
         let remaining = model.boards.filter { $0.id != boardId }
@@ -196,7 +217,7 @@ final class TaskBoardViewModel: ObservableObject {
 
     // MARK: - Task Lifecycle (CRUD)
 
-    /// 创建任务 — 对齐 Flutter `addTask`。
+    /// 创建任务。
     func addTask(
         _ title: String,
         status: TaskStatus = .todo,
@@ -213,6 +234,9 @@ final class TaskBoardViewModel: ObservableObject {
     ) async {
         let trimmedTitle = title.trimmingCharacters(in: .whitespaces)
         guard !trimmedTitle.isEmpty else { return }
+
+        model = model.updating(isLoading: true)
+        defer { model = model.updating(isLoading: false) }
 
         do {
             let boardSlug = model.activeBoard?.slug ?? "default"
@@ -256,241 +280,71 @@ final class TaskBoardViewModel: ObservableObject {
         }
     }
 
-    /// 更新任务属性（与 API 同步）— 对齐 Flutter `updateTask`。
-    func updateTask(
-        _ taskId: String,
-        title: String? = nil,
-        body: String? = nil,
-        priority: String? = nil,
-        assignee: String? = nil,
-        workspace: String? = nil,
-        tenant: String? = nil
-    ) {
+    /// 完成任务 — 调用 `hermes kanban complete <id>`。
+    func completeTask(_ taskId: String) async {
         let newTasks = model.tasks.map { t -> TaskItem in
             if t.id == taskId {
-                return t.updating(
-                    title: title,
-                    body: body,
-                    priority: priority,
-                    assignee: assignee,
-                    workspace: workspace,
-                    tenant: tenant,
-                    updatedAt: Date()
-                )
+                return t.updating(status: .done, updatedAt: Date())
             }
             return t
         }
-        model = model.updating(tasks: newTasks)
-
-        var bodyMap: [String: Any] = [:]
-        if let title = title { bodyMap["title"] = title }
-        if let body = body { bodyMap["body"] = body }
-        if let priority = priority { bodyMap["priority"] = priority }
-        if let assignee = assignee { bodyMap["assignee"] = assignee }
-        if let workspace = workspace { bodyMap["workspace"] = workspace }
-        if let tenant = tenant { bodyMap["tenant"] = tenant }
-        if !bodyMap.isEmpty {
-            syncUpdateTask(taskId: taskId, body: bodyMap)
-        }
+        model = model.updating(tasks: newTasks, isLoading: true)
+        defer { model = model.updating(isLoading: false) }
+        _ = try? await service.updateKanbanTask(taskId: taskId, body: ["status": "done"])
     }
 
-    /// 完成任务的增强版（传入 summary + metadata 独立字段）— 对齐官方
-    /// `kanban complete <id> --result <summary> [--metadata <json>]`。
-    func completeTask(
-        _ taskId: String,
-        summary: String? = nil,
-        metadata: [String: String] = [:]
-    ) {
-        let newTasks = model.tasks.map { t -> TaskItem in
-            if t.id == taskId {
-                return t.updating(
-                    status: .done,
-                    summary: summary ?? t.summary,
-                    metadata: metadata.isEmpty ? t.metadata : metadata,
-                    updatedAt: Date()
-                )
-            }
-            return t
-        }
-        model = model.updating(tasks: newTasks)
-
-        var body: [String: Any] = ["status": "done"]
-        if let summary = summary, !summary.isEmpty {
-            body["summary"] = summary
-        }
-        if !metadata.isEmpty {
-            body["metadata"] = metadata
-        }
-        syncUpdateTask(taskId: taskId, body: body)
-    }
-
-    /// 阻塞任务（移到 blocked，reason 透传给 CLI `block <id> <reason>`）— 对齐 Flutter `blockTask`。
-    func blockTask(_ taskId: String, reason: String) {
+    /// 阻塞任务 — 调用 `hermes kanban block <id> <reason>`。
+    func blockTask(_ taskId: String, reason: String) async {
         let trimmedReason = reason.trimmingCharacters(in: .whitespaces)
-        let newComment = TaskComment(
-            id: "\(Int(Date().timeIntervalSince1970 * 1000))",
-            taskId: taskId,
-            author: "human",
-            body: "Blocked: \(trimmedReason)",
-            createdAt: Date()
-        )
         let newTasks = model.tasks.map { t -> TaskItem in
             if t.id == taskId {
-                return t.updating(
-                    status: .blocked,
-                    comments: t.comments + [newComment],
-                    updatedAt: Date()
-                )
+                return t.updating(status: .blocked, updatedAt: Date())
             }
             return t
         }
-        model = model.updating(tasks: newTasks)
-        // CLI 端 `block <id> <reason>` 需要 reason 单独传,不能合并到 status body
-        syncBlockTask(taskId: taskId, reason: trimmedReason)
-        syncAddComment(taskId: taskId, body: "Blocked: \(trimmedReason)")
+        model = model.updating(tasks: newTasks, isLoading: true)
+        defer { model = model.updating(isLoading: false) }
+        _ = try? await service.updateKanbanTask(
+            taskId: taskId,
+            body: ["status": "blocked", "reason": trimmedReason]
+        )
     }
 
-    /// 解除阻塞（移回 ready）— 对齐 Flutter `unblockTask`。
-    func unblockTask(_ taskId: String) {
+    /// 解除阻塞 — 调用 `hermes kanban unblock <id>`。
+    func unblockTask(_ taskId: String) async {
         let newTasks = model.tasks.map { t -> TaskItem in
             if t.id == taskId {
                 return t.updating(status: .ready, updatedAt: Date())
             }
             return t
         }
-        model = model.updating(tasks: newTasks)
-        syncUpdateTask(taskId: taskId, body: ["status": "ready"])
+        model = model.updating(tasks: newTasks, isLoading: true)
+        defer { model = model.updating(isLoading: false) }
+        _ = try? await service.updateKanbanTask(taskId: taskId, body: ["status": "ready"])
     }
 
-    /// 归档任务（移到 archived）— 对齐 Flutter `archiveTask`。
-    func archiveTask(_ taskId: String) {
+    /// 归档任务 — 调用 `hermes kanban archive <id>`。
+    func archiveTask(_ taskId: String) async {
         let newTasks = model.tasks.map { t -> TaskItem in
             if t.id == taskId {
                 return t.updating(status: .archived, updatedAt: Date())
             }
             return t
         }
-        model = model.updating(tasks: newTasks)
-        syncUpdateTask(taskId: taskId, body: ["status": "archived"])
+        model = model.updating(tasks: newTasks, isLoading: true)
+        defer { model = model.updating(isLoading: false) }
+        _ = try? await service.updateKanbanTask(taskId: taskId, body: ["status": "archived"])
     }
 
-    /// 删除任务（实际走 archive，Hermes Kanban 不支持硬删除）— 对齐 Flutter `deleteTask`。
-    func deleteTask(_ taskId: String) {
+    /// 删除任务（实际走 archive，Hermes Kanban 不支持硬删除）。
+    func deleteTask(_ taskId: String) async {
         let previousTasks = model.tasks
-        model = model.updating(tasks: previousTasks.filter { $0.id != taskId })
-        syncUpdateTask(taskId: taskId, body: ["status": "archived"])
-    }
-
-    /// 添加评论（与 API 同步）— 对齐 Flutter `addComment`。
-    func addComment(_ taskId: String, body: String) {
-        let trimmed = body.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return }
-
-        let comment = TaskComment(
-            id: "\(Int(Date().timeIntervalSince1970 * 1000))",
-            taskId: taskId,
-            author: "human",
-            body: trimmed,
-            createdAt: Date()
+        model = model.updating(
+            tasks: previousTasks.filter { $0.id != taskId },
+            isLoading: true
         )
-        let newTasks = model.tasks.map { t -> TaskItem in
-            if t.id == taskId {
-                return t.updating(
-                    comments: t.comments + [comment],
-                    updatedAt: Date()
-                )
-            }
-            return t
-        }
-        model = model.updating(tasks: newTasks)
-        syncAddComment(taskId: taskId, body: trimmed)
-    }
-
-    /// 链接两个任务（parent → child）— 对齐 Flutter `linkTasks`。
-    func linkTasks(parentId: String, childId: String) {
-        let newTasks = model.tasks.map { t -> TaskItem in
-            if t.id == childId, !t.parentIds.contains(parentId) {
-                return t.updating(
-                    parentIds: t.parentIds + [parentId],
-                    updatedAt: Date()
-                )
-            }
-            return t
-        }
-        model = model.updating(tasks: newTasks)
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                _ = try await self.service.createKanbanLink(body: [
-                    "parent_id": parentId,
-                    "child_id": childId,
-                ])
-            } catch {
-                DMLogger.error(
-                    "TaskBoardViewModel.linkTasks API: \(error.localizedDescription)",
-                    name: "TaskBoardVM"
-                )
-            }
-        }
-    }
-
-    // MARK: - Private API Sync
-
-    /// 同步任务状态/属性到后端 — 对齐 Flutter `_syncUpdateTask`。
-    private func syncUpdateTask(taskId: String, body: [String: Any]) {
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                let success = try await self.service.updateKanbanTask(taskId: taskId, body: body)
-                if !success {
-                    DMLogger.log(
-                        "TaskBoardViewModel._syncUpdateTask(\(taskId)): API returned false",
-                        name: "TaskBoardVM"
-                    )
-                }
-            } catch {
-                DMLogger.error(
-                    "TaskBoardViewModel._syncUpdateTask(\(taskId)): \(error.localizedDescription)",
-                    name: "TaskBoardVM"
-                )
-            }
-        }
-    }
-
-    /// 同步添加评论到后端 — 对齐 Flutter `_syncAddComment`。
-    private func syncAddComment(taskId: String, body: String) {
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                _ = try await self.service.addKanbanComment(
-                    taskId: taskId,
-                    body: ["body": body, "author": "human"]
-                )
-            } catch {
-                DMLogger.error(
-                    "TaskBoardViewModel._syncAddComment(\(taskId)): \(error.localizedDescription)",
-                    name: "TaskBoardVM"
-                )
-            }
-        }
-    }
-
-    /// 同步阻塞任务到后端(reason 单独走 CLI 位置参数)。
-    private func syncBlockTask(taskId: String, reason: String) {
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                _ = try await self.service.updateKanbanTask(
-                    taskId: taskId,
-                    body: ["status": "blocked", "reason": reason]
-                )
-            } catch {
-                DMLogger.error(
-                    "TaskBoardViewModel._syncBlockTask(\(taskId)): \(error.localizedDescription)",
-                    name: "TaskBoardVM"
-                )
-            }
-        }
+        defer { model = model.updating(isLoading: false) }
+        _ = try? await service.updateKanbanTask(taskId: taskId, body: ["status": "archived"])
     }
 
     // MARK: - Triage / Display Actions
@@ -577,6 +431,8 @@ final class TaskBoardViewModel: ObservableObject {
     /// 调度器会扫描 Ready 任务并把它们分发到 running 状态。
     func nudgeDispatcher() async {
         DMLogger.log("[TaskBoardVM] nudgeDispatcher", name: "TaskBoardVM")
+        model = model.updating(isLoading: true)
+        defer { model = model.updating(isLoading: false) }
         do {
             let success = try await service.nudgeDispatcher()
             if success {
@@ -791,6 +647,9 @@ final class TaskBoardViewModel: ObservableObject {
         guard !slug.trimmingCharacters(in: .whitespaces).isEmpty,
               !name.trimmingCharacters(in: .whitespaces).isEmpty
         else { return }
+
+        model = model.updating(isLoading: true)
+        defer { model = model.updating(isLoading: false) }
 
         do {
             let body: [String: Any] = [

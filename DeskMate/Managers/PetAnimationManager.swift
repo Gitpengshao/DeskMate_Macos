@@ -4,6 +4,10 @@ final class PetAnimationManager {
     private var runFrames: [NSImage] = []
     private var dragFrames: [NSImage] = []
     private var sleepFrames: [NSImage] = []
+    private var leaveFrames: [NSImage] = []
+    private var idleFrames: [NSImage] = []
+    private var walkFrames: [NSImage] = []
+    private var workAtDeskFrames: [NSImage] = []
     private var currentFrameIndex: Int = 0
     private var animTick: Int = 0
     private let animSpeedDivider: Int = 3
@@ -17,6 +21,10 @@ final class PetAnimationManager {
         runFrames = sliceSpriteSheet(config: SpriteSheets.run)
         dragFrames = sliceSpriteSheet(config: SpriteSheets.drag)
         sleepFrames = sliceSpriteSheet(config: SpriteSheets.sleep)
+        leaveFrames = sliceSpriteSheet(config: SpriteSheets.leave)
+        idleFrames = sliceSpriteSheet(config: SpriteSheets.idle)
+        walkFrames = sliceSpriteSheet(config: SpriteSheets.walk)
+        workAtDeskFrames = sliceSpriteSheet(config: SpriteSheets.workAtDesk)
         currentFrame = runFrames.first
     }
 
@@ -69,6 +77,10 @@ final class PetAnimationManager {
         case .run:   frames = runFrames
         case .drag:  frames = dragFrames
         case .sleep: frames = sleepFrames
+        case .leave: frames = leaveFrames
+        case .idle:  frames = idleFrames
+        case .walk:  frames = walkFrames
+        case .workAtDesk: frames = workAtDeskFrames
         case .think, .work: frames = runFrames
         }
         guard !frames.isEmpty else { return }
@@ -97,6 +109,34 @@ final class PetAnimationManager {
         currentFrameIndex = 0
         animTick = 0
         currentFrame = sleepFrames.first
+    }
+
+    func switchToLeave() {
+        currentAnimation = .leave
+        currentFrameIndex = 0
+        animTick = 0
+        currentFrame = leaveFrames.first
+    }
+
+    func switchToIdle() {
+        currentAnimation = .idle
+        currentFrameIndex = 0
+        animTick = 0
+        currentFrame = idleFrames.first
+    }
+
+    func switchToWalk() {
+        currentAnimation = .walk
+        currentFrameIndex = 0
+        animTick = 0
+        currentFrame = walkFrames.first
+    }
+
+    func switchToWorkAtDesk() {
+        currentAnimation = .workAtDesk
+        currentFrameIndex = 0
+        animTick = 0
+        currentFrame = workAtDeskFrames.first
     }
 
     // MARK: - State Reset (kept for backward compatibility)
