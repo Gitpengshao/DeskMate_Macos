@@ -104,6 +104,11 @@ final class PetWindowController: NSObject {
         viewModel.stopAllTimers()
     }
 
+    /// 桌宠窗口当前是否可见。
+    var isVisible: Bool {
+        panel?.isVisible ?? false
+    }
+
     // MARK: - Settings Bindings
 
     private func setupSettingsBindings() {

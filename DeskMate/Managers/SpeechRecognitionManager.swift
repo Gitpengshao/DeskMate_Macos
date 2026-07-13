@@ -34,7 +34,7 @@ final class SpeechRecognitionManager: NSObject, ObservableObject {
     var onTranscription: ((String, Bool) -> Void)?
     var onError: ((String) -> Void)?
 
-    private override init() {
+    override init() {
         let preferredLocale = Locale(identifier: "zh-Hans")
         self.speechRecognizer = SFSpeechRecognizer(locale: preferredLocale)
         super.init()

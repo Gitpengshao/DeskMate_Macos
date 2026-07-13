@@ -28,12 +28,13 @@ final class ImageAttachmentManager {
     private let maxPixelSize: CGFloat = 1600
 
     /// 缓存目录：`~/.hermes/images/`。
-    private lazy var cacheDirectory: URL = {
-        let home = AppConstants.resolveHermesHome()
-        return URL(fileURLWithPath: home).appendingPathComponent("images", isDirectory: true)
-    }()
+    private let cacheDirectory: URL
 
-    private init() {}
+    private init() {
+        let home = AppConstants.resolveHermesHome()
+        self.cacheDirectory = URL(fileURLWithPath: home)
+            .appendingPathComponent("images", isDirectory: true)
+    }
 
     // MARK: - Public API
 
@@ -95,6 +96,42 @@ final class ImageAttachmentManager {
         }
     }
 
+    /// 直接捕获当前主显示器全屏并生成附件，不进入交互模式。
+    ///
+    /// 会先检查并申请屏幕录制权限，未授权时返回 `permissionDenied`。
+    /// - Parameter completion: 主线程回调。
+    func captureFullScreenScreenshot(completion: @escaping @MainActor (Result<ChatImageAttachment, Error>) -> Void) {
+        workQueue.async { [weak self] in
+            guard let self = self else { return }
+
+            guard self.ensureScreenRecordingPermission() else {
+                DispatchQueue.main.async {
+                    completion(.failure(ImageAttachmentError.permissionDenied))
+                }
+                return
+            }
+
+            let result = self.captureMainDisplay()
+            DispatchQueue.main.async {
+                completion(result)
+            }
+        }
+    }
+
+    /// 仅检查屏幕录制权限是否已授权，不主动弹窗。
+    func checkScreenRecordingPermission() -> Bool {
+        if #available(macOS 10.15, *) {
+            return CGPreflightScreenCaptureAccess()
+        }
+        return true
+    }
+
+    /// 主动申请一次屏幕录制权限，并返回最终授权状态。
+    @discardableResult
+    func requestScreenRecordingPermission() -> Bool {
+        ensureScreenRecordingPermission()
+    }
+
     // MARK: - Private implementation
 
     /// 处理本地图片：加载 → 缩放 → PNG → 缓存 → base64。
@@ -150,6 +187,34 @@ final class ImageAttachmentManager {
 
         defer {
             // 处理完后删除临时文件；已保存到 ~/.hermes/images/ 的缓存保留。
+            try? FileManager.default.removeItem(at: tempURL)
+        }
+
+        return processImageFile(at: tempURL)
+    }
+
+    /// 捕获主显示器全屏并生成附件。
+    private func captureMainDisplay() -> Result<ChatImageAttachment, Error> {
+        let tempURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("deskmate_fullscreen_\(UUID().uuidString).png")
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        // -x : 不播放截图声音；不带 -i 表示直接全屏截图。
+        process.arguments = ["-x", tempURL.path]
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return .failure(ImageAttachmentError.screenshotFailed("无法启动截图工具：\(error.localizedDescription)"))
+        }
+
+        guard FileManager.default.fileExists(atPath: tempURL.path) else {
+            return .failure(ImageAttachmentError.screenshotFailed("全屏截图未生成"))
+        }
+
+        defer {
             try? FileManager.default.removeItem(at: tempURL)
         }
 
@@ -277,6 +342,54 @@ final class ImageAttachmentManager {
         let cacheURL = cacheDirectory.appendingPathComponent(fileName)
         try data.write(to: cacheURL)
         return cacheURL
+    }
+
+    // MARK: - Historical message fallback
+
+    /// 从 `~/.hermes/images/` 中的已有 PNG 文件生成附件（不重新压缩）。
+    nonisolated func attachment(fromLocalPath path: String) -> ChatImageAttachment? {
+        let url = URL(fileURLWithPath: path)
+        guard FileManager.default.fileExists(atPath: path),
+              let data = try? Data(contentsOf: url) else {
+            return nil
+        }
+        return ChatImageAttachment(
+            id: UUID().uuidString,
+            dataUrl: "data:image/png;base64,\(data.base64EncodedString())",
+            localPath: path,
+            displayName: url.lastPathComponent
+        )
+    }
+
+    /// 根据消息时间戳从 `~/.hermes/images/` 找回匹配的截图附件。
+    ///
+    /// Hermes 后端在历史消息中只保留 `[screenshot]` 占位文本，当本地缓存索引丢失时，
+    /// 通过文件修改时间反向匹配，找到不晚于消息时间的最新的未使用图片。
+    nonisolated func resolveMissingAttachment(
+        messageTimestamp: Date,
+        excludedPaths: Set<String> = []
+    ) -> ChatImageAttachment? {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: cacheDirectory.path) else { return nil }
+        guard let files = try? fm.contentsOfDirectory(
+            at: cacheDirectory,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: []
+        ) else { return nil }
+
+        let candidates = files
+            .filter { $0.pathExtension.lowercased() == "png" }
+            .compactMap { url -> (url: URL, date: Date)? in
+                guard let attrs = try? fm.attributesOfItem(atPath: url.path),
+                      let date = attrs[.modificationDate] as? Date else { return nil }
+                return (url, date)
+            }
+            .filter { !excludedPaths.contains($0.url.path) }
+            .filter { $0.date <= messageTimestamp }
+            .sorted { $0.date > $1.date }
+
+        guard let best = candidates.first else { return nil }
+        return attachment(fromLocalPath: best.url.path)
     }
 }
 

@@ -270,6 +270,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSAccessibilityUsageDescription = "DeskMate 需要辅助功能权限以监听全局语音快捷键。";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "DeskMate 需要访问麦克风以进行语音输入，语音识别在本地完成，不会上传音频。";
 				INFOPLIST_KEY_NSScreenCaptureUsageDescription = "DeskMate 需要截取屏幕内容以发送给 AI 进行识别和回答。";
@@ -304,6 +305,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSAccessibilityUsageDescription = "DeskMate 需要辅助功能权限以监听全局语音快捷键。";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "DeskMate 需要访问麦克风以进行语音输入，语音识别在本地完成，不会上传音频。";
 				INFOPLIST_KEY_NSScreenCaptureUsageDescription = "DeskMate 需要截取屏幕内容以发送给 AI 进行识别和回答。";

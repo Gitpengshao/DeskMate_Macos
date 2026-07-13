@@ -4,6 +4,9 @@ import Combine
 /// ViewModel for MainPage — mirrors Flutter `MainViewModel`.
 @MainActor
 final class MainViewModel: ObservableObject {
+    /// 全局共享实例，供语音快捷键等需要切换导航的模块使用。
+    static let shared = MainViewModel()
+
     @Published var model: MainModel
 
     // MARK: Section ordering (matches Flutter)

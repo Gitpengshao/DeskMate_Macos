@@ -20,19 +20,36 @@ struct DeskMateApp: App {
 // MARK: - AppDelegate
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    static weak var shared: AppDelegate?
+
     let viewModel = PetViewModel()
     let onboardingVM = OnboardingViewModel()
 
     private var petWindowController: PetWindowController?
     private let notchManager = DynamicNotchManager.shared
-    private var onboardingWindow: NSWindow?
-    private var mainWindow: NSWindow?
+    private(set) var onboardingWindow: NSWindow?
+    private(set) var mainWindow: NSWindow?
     /// 预构造的 `NSHostingController<MainPage>`，仅持有 rootView，未触发 body 求值。
     /// 真正构造 NSWindow / 访问 view 会推迟到 `continueOpenMainConsole` 中执行。
     private var preloadedHostingController: NSHostingController<MainPage>?
     private var gatewayStarted: Bool = false
 
+    /// 主控制台或 Onboarding 窗口是否处于打开状态。
+    var isConsoleOpen: Bool {
+        mainWindow != nil || onboardingWindow != nil
+    }
+
+    /// 桌宠悬浮窗口当前是否可见。
+    var isPetVisible: Bool {
+        petWindowController?.isVisible ?? false
+    }
+
+    /// 桌宠 ViewModel，供语音快捷键等外部模块驱动动画。
+    var petViewModel: PetViewModel? { viewModel }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        AppDelegate.shared = self
+
         NSLog("[AppDelegate] applicationDidFinishLaunching: 启动")
 
         // 隐藏 Dock 图标，仅通过灵动岛和桌宠交互
@@ -45,7 +62,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // 2. 创建独立的桌宠悬浮窗口
             self.setupPetWindow()
 
-            // 3. 设置灵动岛回调
+            // 3. 初始化全局语音快捷键监听（根据设置自动注册/注销）
+            _ = GlobalShortcutManager.shared
+
+            // 4. 设置灵动岛回调
             self.notchManager.onOpenConsole = { [weak self] in
                 self?.openConsole()
             }
@@ -99,7 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - 控制台 / Onboarding 窗口
 
-    private func openConsole() {
+    func openConsole() {
         // 打开控制台时恢复 Dock 图标，方便 Cmd+Tab 切换
         NSApplication.shared.setActivationPolicy(.regular)
 

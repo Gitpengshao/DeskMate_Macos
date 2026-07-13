@@ -24,6 +24,7 @@ final class PetBehaviorManager {
 
     private(set) var isSleeping = false
     private(set) var isGatewayAbnormal = false
+    private(set) var isListening = false
 
     weak var window: NSWindow?
 
@@ -47,6 +48,9 @@ final class PetBehaviorManager {
 
         // 网关异常时不可移动
         if isGatewayAbnormal { return }
+
+        // 聆听时保持原地不动，也不累计睡眠 tick
+        if isListening { return }
 
         // 计数行走 tick（不拖拽时才累计）
         if !isDragging {
@@ -79,6 +83,17 @@ final class PetBehaviorManager {
         }
 
         window.setFrame(windowFrame, display: true)
+    }
+
+    // MARK: - Listening
+
+    func startListening() {
+        isListening = true
+        walkTickCount = 0
+    }
+
+    func stopListening() {
+        isListening = false
     }
 
     // MARK: - Sleep / Wake
@@ -175,6 +190,7 @@ final class PetBehaviorManager {
         walkTimer = nil
         mouseDownTimer?.invalidate()
         mouseDownTimer = nil
+        isListening = false
     }
 
     /// 重置拖拽状态

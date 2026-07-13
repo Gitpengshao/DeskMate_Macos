@@ -3,7 +3,7 @@ import SwiftUI
 /// Main page with sidebar navigation — mirrors Flutter `MainPage`.
 /// MVVM: View observes MainViewModel.
 struct MainPage: View {
-    @StateObject private var viewModel = MainViewModel()
+    @StateObject private var viewModel = MainViewModel.shared
     // Main 页面与 AI 对话页统一使用黑色主题
     @State private var isDark: Bool = true
 

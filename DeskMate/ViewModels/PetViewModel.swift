@@ -115,6 +115,27 @@ final class PetViewModel: ObservableObject {
         applyDefaultAnimation()
     }
 
+    /// 切换到 listen 动画，用于语音聆听快捷键反馈。
+    func startListeningAnimation() {
+        guard !behaviorManager.isDragging else { return }
+        if behaviorManager.isSleeping {
+            behaviorManager.wakeUp()
+        }
+        behaviorManager.startListening()
+        animationManager.switchToListen()
+        currentFrame = animationManager.currentFrame
+    }
+
+    /// 结束 listen 动画，恢复到当前默认动画。
+    func stopListeningAnimation() {
+        behaviorManager.stopListening()
+        guard !behaviorManager.isDragging else {
+            currentFrame = animationManager.currentFrame
+            return
+        }
+        applyDefaultAnimation()
+    }
+
     // MARK: - Settings Bindings
 
     private func setupSettingsBindings() {

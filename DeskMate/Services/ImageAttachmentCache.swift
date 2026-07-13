@@ -69,8 +69,19 @@ final class ImageAttachmentCache {
 
     private func persist() {
         do {
+            let parent = indexURL.deletingLastPathComponent()
+            if !FileManager.default.fileExists(atPath: parent.path) {
+                try FileManager.default.createDirectory(
+                    at: parent,
+                    withIntermediateDirectories: true
+                )
+            }
             let data = try JSONEncoder().encode(index)
             try data.write(to: indexURL, options: .atomic)
+            DMLogger.log(
+                "ImageAttachmentCache persisted: \(indexURL.path) entries=\(index.entries.count)",
+                name: "ImageAttachmentCache"
+            )
         } catch {
             DMLogger.error(
                 "ImageAttachmentCache persist failed: \(error.localizedDescription)",

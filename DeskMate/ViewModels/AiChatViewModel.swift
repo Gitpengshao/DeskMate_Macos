@@ -9,6 +9,9 @@ import Combine
 @MainActor
 final class AiChatViewModel: ObservableObject {
 
+    /// 全局共享实例，供语音快捷键等需要在控制台未打开时操作聊天状态的模块使用。
+    static let shared = AiChatViewModel()
+
     @Published var model: AiChatModel
 
     /// 与 Flutter `hermesServiceProvider` 等价的依赖注入入口；
@@ -584,6 +587,10 @@ final class AiChatViewModel: ObservableObject {
             }
 
             // 后端不保存图片数据，按 user 消息顺序把本地图片附件与后端消息 ID 关联缓存
+            DMLogger.log(
+                "[DEBUG] _syncFromDatabase: syncing image attachments, localMessages=\(self.model.messages.count)",
+                name: "AiChatVM"
+            )
             self.syncImageAttachments(
                 localMessages: self.model.messages,
                 syncedMessages: synced,
@@ -708,7 +715,11 @@ final class AiChatViewModel: ObservableObject {
             }
 
             let sessionIdForCache = sessionId
-            var messages: [ChatMessage] = raw!.map { m in
+            var messages: [ChatMessage] = []
+            // 记录包含 [screenshot] 占位符但缓存未命中的消息，用于后续从文件系统兜底
+            var unresolvedPlaceholders: [(index: Int, messageId: String, date: Date)] = []
+
+            for (index, m) in raw!.enumerated() {
                 let role = self.castToString(m["role"]) ?? "user"
                 let sender: MessageSender
                 switch role {
@@ -759,14 +770,54 @@ final class AiChatViewModel: ObservableObject {
                         messageId: id
                     )
                     message.imageAttachments = attachments
-                    // 成功还原图片后再移除占位符；缓存未命中时保留原始文本，避免消息消失
-                    if !attachments.isEmpty {
-                        message.text = content
-                            .replacingOccurrences(of: "[screenshot]", with: "")
-                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                    if attachments.isEmpty, let messageDate = self.messageDate(from: m) {
+                        unresolvedPlaceholders.append((index: index, messageId: id, date: messageDate))
+                    } else if !attachments.isEmpty {
+                        DMLogger.log(
+                            "[DEBUG] loadSession image cache hit: " +
+                            "sessionId=\(sessionIdForCache) messageId=\(id) count=\(attachments.count)",
+                            name: "AiChatVM"
+                        )
                     }
+                    // 无论缓存是否命中，都移除占位符文本，避免 UI 直接显示 [screenshot]
+                    message.text = content
+                        .replacingOccurrences(of: "[screenshot]", with: "")
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
                 }
-                return message
+                messages.append(message)
+            }
+
+            // 缓存未命中时，按消息时间戳从 ~/.hermes/images/ 找回图片。
+            // 从新到旧处理，避免较早消息占用较晚消息的截图。
+            var usedImagePaths = Set<String>()
+            for info in unresolvedPlaceholders.sorted(by: { $0.date > $1.date }) {
+                if let fallback = ImageAttachmentManager.shared.resolveMissingAttachment(
+                    messageTimestamp: info.date,
+                    excludedPaths: usedImagePaths
+                ) {
+                    messages[info.index].imageAttachments = [fallback]
+                    if let localPath = fallback.localPath {
+                        usedImagePaths.insert(localPath)
+                    }
+                    ImageAttachmentCache.shared.saveAttachments(
+                        [fallback],
+                        sessionId: sessionIdForCache,
+                        messageId: info.messageId
+                    )
+                    DMLogger.log(
+                        "[DEBUG] loadSession fallback image resolved: " +
+                        "sessionId=\(sessionIdForCache) messageId=\(info.messageId) " +
+                        "path=\(fallback.localPath ?? "nil")",
+                        name: "AiChatVM"
+                    )
+                } else {
+                    DMLogger.log(
+                        "[DEBUG] loadSession fallback image not found: " +
+                        "sessionId=\(sessionIdForCache) messageId=\(info.messageId) " +
+                        "timestamp=\(info.date)",
+                        name: "AiChatVM"
+                    )
+                }
             }
 
             DMLogger.log(
@@ -1001,9 +1052,25 @@ final class AiChatViewModel: ObservableObject {
         )
 
         for (index, local) in localUserMessages.enumerated() {
-            guard index < syncedUserMessages.count else { break }
-            guard !local.imageAttachments.isEmpty else { continue }
+            guard index < syncedUserMessages.count else {
+                DMLogger.log(
+                    "[DEBUG] syncImageAttachments: index \(index) out of syncedUser range (\(syncedUserMessages.count))",
+                    name: "AiChatVM"
+                )
+                break
+            }
+            guard !local.imageAttachments.isEmpty else {
+                DMLogger.log(
+                    "[DEBUG] syncImageAttachments: local user msg \(local.id) has no attachments",
+                    name: "AiChatVM"
+                )
+                continue
+            }
             let synced = syncedUserMessages[index]
+            DMLogger.log(
+                "[DEBUG] syncImageAttachments: saving local msg \(local.id) -> synced id \(synced.id) count=\(local.imageAttachments.count)",
+                name: "AiChatVM"
+            )
             ImageAttachmentCache.shared.saveAttachments(
                 local.imageAttachments,
                 sessionId: sessionId,
@@ -1015,6 +1082,51 @@ final class AiChatViewModel: ObservableObject {
     /// 判断后端返回的文本是否包含图片占位符。
     private func isImagePlaceholder(_ text: String) -> Bool {
         text.contains("[screenshot]")
+    }
+
+    /// 从后端原始消息中解析时间戳，支持秒/毫秒级 Unix 时间戳和 ISO8601 字符串。
+    private func messageDate(from raw: [String: Any]) -> Date? {
+        let timestamp = raw["timestamp"]
+        if let date = timestamp as? Date { return date }
+        if let interval = timestamp as? TimeInterval {
+            if interval > 1_000_000_000_000 {
+                return Date(timeIntervalSince1970: interval / 1000)
+            }
+            if interval > 1_000_000_000 {
+                return Date(timeIntervalSince1970: interval)
+            }
+        }
+        if let number = timestamp as? NSNumber {
+            let interval = number.doubleValue
+            if interval > 1_000_000_000_000 {
+                return Date(timeIntervalSince1970: interval / 1000)
+            }
+            if interval > 1_000_000_000 {
+                return Date(timeIntervalSince1970: interval)
+            }
+        }
+        if let str = timestamp as? String {
+            let isoFormatter = ISO8601DateFormatter()
+            isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = isoFormatter.date(from: str) { return date }
+            isoFormatter.formatOptions = [.withInternetDateTime]
+            if let date = isoFormatter.date(from: str) { return date }
+
+            let formats = [
+                "yyyy-MM-dd'T'HH:mm:ss.SSSZ",
+                "yyyy-MM-dd'T'HH:mm:ssZ",
+                "yyyy-MM-dd HH:mm:ss",
+                "yyyy-MM-dd HH:mm:ss.SSS"
+            ]
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = TimeZone(identifier: "UTC")
+            for format in formats {
+                formatter.dateFormat = format
+                if let date = formatter.date(from: str) { return date }
+            }
+        }
+        return nil
     }
 
     /// 打印后端返回的单条历史消息原始字段，用于诊断图片/多模态格式。
@@ -1040,9 +1152,18 @@ final class AiChatViewModel: ObservableObject {
         } else {
             contentDesc = "\(contentType): \(String(describing: content).prefix(200))"
         }
+        let timestampDesc: String
+        if let date = self.messageDate(from: m) {
+            timestampDesc = "parsedDate=\(date)"
+        } else if let ts = m["timestamp"] {
+            timestampDesc = "raw=\(String(describing: ts))"
+        } else {
+            timestampDesc = "missing"
+        }
         DMLogger.log(
             "[DEBUG] loadSession raw[\(index)] id=\(id) role=\(role) " +
             "contentType=\(contentType) content=\(contentDesc) " +
+            "timestamp=\(timestampDesc) " +
             "allKeys=\(m.keys.sorted())",
             name: "AiChatVM"
         )
