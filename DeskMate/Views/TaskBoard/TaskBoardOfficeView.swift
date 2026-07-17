@@ -17,6 +17,9 @@ struct TaskBoardOfficeView: View {
     @State private var lastTargets: [String: PetAnimation] = [:]
     @State private var lastTransitions: [String: AgentAnimationPhase] = [:]
 
+    @State private var isRotating = false
+    @State private var bounceOffset: CGFloat = 0
+
     var body: some View {
         GeometryReader { geo in
             ZStack {
@@ -51,13 +54,31 @@ struct TaskBoardOfficeView: View {
         Color.black.opacity(0.15)
             .ignoresSafeArea()
             .overlay(
-                ProgressView()
-                    .scaleEffect(1.2)
-                    .frame(width: 48, height: 48)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color.white)
-                    )
+                VStack(spacing: 16) {
+                    Image("applogo")
+                        .resizable()
+                        .interpolation(.high)
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 64, height: 64)
+                        .rotationEffect(.degrees(isRotating ? 360 : 0))
+                        .offset(y: bounceOffset)
+                        .onAppear {
+                            withAnimation(.linear(duration: 1.2).repeatForever(autoreverses: false)) {
+                                isRotating = true
+                            }
+                            withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
+                                bounceOffset = -12
+                            }
+                        }
+                        .onDisappear {
+                            isRotating = false
+                            bounceOffset = 0
+                        }
+
+                    Text("加载看板中…")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(OfficePalette.textPrimary)
+                }
             )
     }
 

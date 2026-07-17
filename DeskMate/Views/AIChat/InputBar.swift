@@ -736,10 +736,7 @@ struct InputBar: View {
     }
 
     private var hintText: String {
-        switch petNameKey {
-        case "petNameHuahua": return "和花花对话… (↩ 发送 · ⇧↩ 换行)"
-        default: return "输入消息… (↩ 发送 · ⇧↩ 换行)"
-        }
+        return "请发送工作内容"
     }
 }
 

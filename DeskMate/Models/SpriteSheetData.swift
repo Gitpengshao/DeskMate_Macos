@@ -83,7 +83,7 @@ enum SpriteSheets {
     static let leave = SpriteSheetConfig(
         imageName: "leave",
         columns: 6,
-        totalFrames: 42,
+        totalFrames: 40,
         frameSize: 180,
         sourceFrameSize: nil
     )
@@ -91,7 +91,7 @@ enum SpriteSheets {
     static let idle = SpriteSheetConfig(
         imageName: "idle",
         columns: 6,
-        totalFrames: 36,
+        totalFrames: 32,
         frameSize: 180,
         sourceFrameSize: nil
     )
