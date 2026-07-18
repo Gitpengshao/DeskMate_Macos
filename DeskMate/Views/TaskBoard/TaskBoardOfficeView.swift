@@ -15,7 +15,7 @@ struct TaskBoardOfficeView: View {
 
     @State private var officeStates: [AgentOfficeState] = []
     @State private var lastTargets: [String: PetAnimation] = [:]
-    @State private var lastTransitions: [String: AgentAnimationPhase] = [:]
+    @State private var lastPhases: [String: AgentAnimationPhase] = [:]
 
     @State private var isRotating = false
     @State private var bounceOffset: CGFloat = 0
@@ -25,7 +25,11 @@ struct TaskBoardOfficeView: View {
             ZStack {
                 OfficeLayout.bgColor.ignoresSafeArea()
 
+                corridorPaths(in: geo.size)
+
                 OfficeDecorationsView(size: geo.size)
+
+                bulletinBoard(in: geo.size)
 
                 agentDesks(in: geo.size)
 
@@ -39,7 +43,7 @@ struct TaskBoardOfficeView: View {
         .task {
             recomputeStates()
         }
-        .task(id: walkTransitionKey) {
+        .task(id: transitionKey) {
             await monitorTransitions()
         }
         .onChange(of: viewModel.model.tasks) { _, _ in
@@ -82,14 +86,18 @@ struct TaskBoardOfficeView: View {
             )
     }
 
-    /// 用于在 walk 过渡期间持续重新评估动画状态。
-    private var walkTransitionKey: String {
+    /// 用于在过渡期间持续重新评估动画状态。
+    private var transitionKey: String {
         officeStates.map { state -> String in
             switch state.transition {
-            case .walking(let until):
+            case .leaving(let until, _):
+                return "l:\(until.timeIntervalSinceReferenceDate)"
+            case .walking(let until, _):
                 return "w:\(until.timeIntervalSinceReferenceDate)"
             case .settled:
                 return "s"
+            case .away:
+                return "a"
             }
         }.joined(separator: "|")
     }
@@ -102,54 +110,159 @@ struct TaskBoardOfficeView: View {
 
         var states: [AgentOfficeState] = []
         var newTargets: [String: PetAnimation] = [:]
-        var newTransitions: [String: AgentAnimationPhase] = [:]
+        var newPhases: [String: AgentAnimationPhase] = [:]
 
         for profile in profiles {
             let profileTasks = tasks.filter {
                 AgentOfficeState.matches(profile: profile, assignee: $0.assignee)
             }
             let previousTarget = lastTargets[profile.id]
-            let previousTransition = lastTransitions[profile.id] ?? .settled
+            let previousPhase = lastPhases[profile.id] ?? .settled
 
             let tempState = AgentOfficeState(
                 profile: profile,
                 tasks: profileTasks,
-                transition: previousTransition
+                transition: previousPhase
             )
             let target = tempState.targetAnimation
 
-            let transition: AgentAnimationPhase
-            if let previousTarget, previousTarget != target {
-                transition = .walking(until: Date().addingTimeInterval(0.8))
+            // 先解析当前 phase 是否已过期
+            let resolved = resolve(previousPhase)
+            let phase: AgentAnimationPhase
+            if let previousTarget = previousTarget, previousTarget != target {
+                phase = AgentOfficeState.phase(
+                    from: previousTarget,
+                    to: target,
+                    previousPhase: resolved
+                )
             } else {
-                switch previousTransition {
-                case .walking(let until):
-                    transition = Date() < until ? previousTransition : .settled
-                case .settled:
-                    transition = .settled
-                }
+                phase = resolved
             }
 
             newTargets[profile.id] = target
-            newTransitions[profile.id] = transition
+            newPhases[profile.id] = phase
             states.append(AgentOfficeState(
                 profile: profile,
                 tasks: profileTasks,
-                transition: transition
+                transition: phase
             ))
         }
 
         lastTargets = newTargets
-        lastTransitions = newTransitions
+        lastPhases = newPhases
         officeStates = states
     }
 
-    /// 在 walk 过渡期间定时刷新，确保过渡结束后切回目标动画。
+    private func resolve(_ phase: AgentAnimationPhase) -> AgentAnimationPhase {
+        switch phase {
+        case .settled, .away:
+            return phase
+        case .leaving(let until, let next):
+            return Date() < until ? phase : resolve(next)
+        case .walking(let until, let next):
+            return Date() < until ? phase : resolve(next)
+        }
+    }
+
+    /// 在过渡期间定时刷新，确保动画阶段按时间推进。
     private func monitorTransitions() async {
-        while officeStates.contains(where: { $0.isWalking }) {
+        while officeStates.contains(where: { $0.isTransitioning }) {
             try? await Task.sleep(nanoseconds: 100_000_000)
             recomputeStates()
         }
+    }
+
+    // MARK: - Bulletin Board
+
+    private func bulletinBoard(in size: CGSize) -> some View {
+        let columns = TaskBoardPageModel.kanbanColumns
+        let counts = viewModel.model.tasksByStatus()
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                Image(systemName: "chart.bar")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(OfficePalette.textMuted)
+                Text("看板列总览")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(OfficePalette.textMuted)
+            }
+
+            HStack(spacing: 6) {
+                ForEach(columns) { status in
+                    VStack(spacing: 3) {
+                        Text(status.label)
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundColor(OfficePalette.textPrimary)
+                            .lineLimit(1)
+                        Text("\(counts[status]?.count ?? 0)")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(statusOfficeColor(status))
+                    }
+                    .frame(minWidth: 44)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5)
+                            .fill(Color.white.opacity(0.6))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 5)
+                            .stroke(OfficePalette.deskShadow.opacity(0.5), lineWidth: 1)
+                    )
+                }
+            }
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(OfficePalette.deskSurface.opacity(0.6))
+                .shadow(color: Color.black.opacity(0.08), radius: 4, x: 0, y: 2)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(OfficePalette.deskShadow, lineWidth: 1)
+        )
+        .position(x: size.width * 0.5, y: size.height * 0.12)
+    }
+
+    private func statusOfficeColor(_ status: TaskStatus) -> Color {
+        switch status {
+        case .triage:  return Color.gray
+        case .todo:    return Color(red: 0.231, green: 0.510, blue: 0.965)
+        case .ready:   return Color(red: 0.50, green: 0.35, blue: 0.95)
+        case .running: return Color(red: 0.133, green: 0.773, blue: 0.369)
+        case .blocked: return Color(red: 0.961, green: 0.620, blue: 0.043)
+        case .done:    return Color(red: 0.420, green: 0.420, blue: 0.420)
+        case .archived: return Color.gray
+        }
+    }
+
+    // MARK: - Corridor Paths
+
+    private func corridorPaths(in size: CGSize) -> some View {
+        let positions = OfficeLayout.deskPositions(count: officeStates.count, in: size)
+        guard positions.count > 1 else { return AnyView(EmptyView()) }
+
+        return AnyView(
+            Canvas { context, _ in
+                let path = Path { p in
+                    for (i, pos) in positions.enumerated() {
+                        let y = pos.y + 50
+                        if i == 0 {
+                            p.move(to: CGPoint(x: pos.x - 60, y: y))
+                        } else {
+                            p.addLine(to: CGPoint(x: pos.x - 60, y: y))
+                        }
+                        p.addLine(to: CGPoint(x: pos.x + 60, y: y))
+                    }
+                }
+                context.stroke(
+                    path,
+                    with: .color(OfficePalette.deskShadow.opacity(0.25)),
+                    lineWidth: 8
+                )
+            }
+        )
     }
 
     // MARK: - Agent Desks

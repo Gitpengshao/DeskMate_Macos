@@ -5,14 +5,18 @@ import Combine
 /// AI 对话页面 ViewModel — 对齐 Flutter `AiChatViewModel`（Riverpod Notifier）。
 ///
 /// MVVM：管理 `model: AiChatModel` 单一状态源，
-/// 通过 `@Published` 通知 SwiftUI 视图刷新。
-@MainActor
-final class AiChatViewModel: ObservableObject {
+    /// 通过 `@Published` 通知 SwiftUI 视图刷新。
+    @MainActor
+    final class AiChatViewModel: ObservableObject {
 
     /// 全局共享实例，供语音快捷键等需要在控制台未打开时操作聊天状态的模块使用。
     static let shared = AiChatViewModel()
 
-    @Published var model: AiChatModel
+    /// 使用默认值并在声明处初始化，避免 `init` 中 `self.model = ...` 触发 `objectWillChange`，
+    /// 从而减少 `@StateObject` 创建时的 "Modifying state during view update" 警告。
+    /// 具体的 `reasoningEffort`、`workingDirectory`、`currentModel` 等由 `setupInitialConfigIfNeeded`
+    /// 在页面 `onAppear` 或外部首次需要时延迟填充。
+    @Published var model: AiChatModel = AiChatModel()
 
     /// 与 Flutter `hermesServiceProvider` 等价的依赖注入入口；
     /// 默认指向 `127.0.0.1:8642`。
@@ -49,6 +53,9 @@ final class AiChatViewModel: ObservableObject {
     /// 本地语音识别管理器。
     private let speechManager = SpeechRecognitionManager.shared
 
+    /// 标记是否已完成初始配置填充，避免重复读取文件。
+    private var hasSetupInitialConfig = false
+
     init(
         gateway: GatewayClient? = nil,
         modelConfigService: ModelConfigService? = nil,
@@ -69,18 +76,44 @@ final class AiChatViewModel: ObservableObject {
         // 页面 onAppear 会再次刷新，确保 Gateway 启动后拿到最新值。
         let writer = configWriter ?? HermesConfigWriter.forProfile(profile)
         self.configWriter = writer
-        // 从 config.yaml 同步当前推理强度（保持与官方默认值兼容）。
-        let loaded = writer.readReasoningEffort()
-        // 从 config.yaml 同步当前工作区目录。
-        let cwd = writer.readTerminalCwd()
-        self.model = AiChatModel(
-            petEmoji: petEmoji,
-            petNameKey: petNameKey,
-            reasoningEffort: loaded,
-            workingDirectory: cwd
-        )
 
         setupSpeechRecognition()
+
+        // 在 init 中直接填充初始配置。model 是 @Published，但在 init 体内赋值不会触发
+        // objectWillChange，因此不会导致 "Modifying state during view update"。
+        // 把 loadCurrentModel / loadWorkingDirectory 也合并到这里，避免在 onAppear 中重复触发视图重建。
+        setupInitialConfigIfNeeded(petEmoji: petEmoji, petNameKey: petNameKey)
+    }
+
+    /// 从 config.yaml 同步当前推理强度、工作区、默认模型等初始值。
+    /// 设计为幂等，只在 init 中调用一次。
+    func setupInitialConfigIfNeeded(petEmoji: String = "🐱", petNameKey: String = "petNameHuahua") {
+        guard !hasSetupInitialConfig else { return }
+        hasSetupInitialConfig = true
+        let loaded = configWriter.readReasoningEffort()
+        let cwd = configWriter.readTerminalCwd()
+        model.petEmoji = petEmoji
+        model.petNameKey = petNameKey
+        model.reasoningEffort = loaded
+        model.workingDirectory = cwd
+        DMLogger.log("[AiChatVM] setupInitialConfigIfNeeded: reasoning=\(loaded.rawValue) cwd=\(cwd ?? "nil")", name: "AiChatVM")
+
+        // 默认模型：后台读取，避免阻塞 init；结果返回后通过 @MainActor Task 异步更新
+        // model.currentModel，避免在视图更新周期中触发 objectWillChange。
+        Task { [weak self] in
+            guard let self = self else { return }
+            let info = await Task.detached(priority: .userInitiated) {
+                self.modelConfigService.readCurrentModel()
+            }.value
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                self.model.currentModel = info
+                DMLogger.log(
+                    "setupInitialConfigIfNeeded: currentModel=\(info?.fullName ?? "nil")",
+                    name: "AiChatVM"
+                )
+            }
+        }
     }
 
     /// 绑定本地语音识别回调。

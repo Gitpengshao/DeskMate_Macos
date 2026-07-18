@@ -28,6 +28,12 @@ class OnboardingViewModel: ObservableObject {
     private let isInstallCancelledLock = NSLock()
     /// 单调递增的 milestone 进度，仅当关键字命中更高档位时才前进。
     private var installMilestone: Double = 0.0
+    /// 当前 milestone 达到的时间，用于在 milestone 之间做平滑进度动画。
+    private var lastMilestoneTime: Date = Date()
+    /// 当前 milestone 的数值，用于平滑进度的基准。
+    private var lastMilestoneValue: Double = 0.0
+    /// 安装进度档位，用于平滑增长的上限约束。
+    private static let progressMilestones: [Double] = [0.0, 0.05, 0.10, 0.15, 0.35, 0.55, 0.75, 0.90, 0.95, 1.0]
 
     private func setInstallProcess(_ p: Process?) {
         installProcessLock.lock(); installProcess = p; installProcessLock.unlock()
@@ -167,6 +173,9 @@ class OnboardingViewModel: ObservableObject {
             self.model.hermesHasModelConfigured = hermesStatus.hasModelConfigured
             self.model.failedCheckIds = failedIds
 
+            // 环境检测完成后刷新当前 SOUL.md 内容，便于第三步展示。
+            self.loadSoulFile()
+
             DMLogger.log("startEnvironmentCheck 完成: isEnvironmentReady=\(self.model.isEnvironmentReady), canAdvance=\(self.model.canAdvance)", name: "OnboardingViewModel")
 
             let pythonPassed = results.first(where: { $0.id == "python" })?.passed ?? false
@@ -203,13 +212,14 @@ class OnboardingViewModel: ObservableObject {
             var results: [CheckResult] = []
 
             // sys_ver — macOS 系统版本
-            DMLogger.log("检测系统版本...", name: "OnboardingViewModel")
+            DMLogger.log("[EnvCheck] 开始检测系统版本...", name: "OnboardingViewModel")
             let osVersion = ProcessInfo.processInfo.operatingSystemVersion
             let sysVerDetail = "macOS \(osVersion.majorVersion).\(osVersion.minorVersion).\(osVersion.patchVersion)"
             results.append(CheckResult(id: "sys_ver", passed: true, detail: sysVerDetail))
+            DMLogger.log("[EnvCheck] 系统版本检测完成: \(sysVerDetail)", name: "OnboardingViewModel")
 
             // network — 网络连通性
-            DMLogger.log("检测网络连通性...", name: "OnboardingViewModel")
+            DMLogger.log("[EnvCheck] 开始检测网络连通性...", name: "OnboardingViewModel")
             let networkPassed = self.checkNetworkConnectivity()
             results.append(CheckResult(
                 id: "network",
@@ -217,9 +227,10 @@ class OnboardingViewModel: ObservableObject {
                 detail: networkPassed ? "已连接" : "未连接",
                 error: networkPassed ? nil : "网络不可用"
             ))
+            DMLogger.log("[EnvCheck] 网络连通性检测完成: \(networkPassed ? "已连接" : "未连接")", name: "OnboardingViewModel")
 
             // python — 检查 python3 是否可用
-            DMLogger.log("检测 Python 环境...", name: "OnboardingViewModel")
+            DMLogger.log("[EnvCheck] 开始检测 Python 环境...", name: "OnboardingViewModel")
             let resolvedHome = self.resolveHermesHome()
             let pythonInfo = self.checkPython(hermesHome: resolvedHome)
             results.append(CheckResult(
@@ -228,9 +239,10 @@ class OnboardingViewModel: ObservableObject {
                 detail: pythonInfo.version,
                 error: pythonInfo.available ? nil : "未安装 Python 3"
             ))
+            DMLogger.log("[EnvCheck] Python 环境检测完成: available=\(pythonInfo.available), version=\(pythonInfo.version ?? "nil")", name: "OnboardingViewModel")
 
             // hermes — 检查 Hermes 引擎
-            DMLogger.log("检测 Hermes 引擎...", name: "OnboardingViewModel")
+            DMLogger.log("[EnvCheck] 开始检测 Hermes 引擎...", name: "OnboardingViewModel")
             let hermesInfo = self.checkHermes(hermesHome: resolvedHome)
             results.append(CheckResult(
                 id: "hermes",
@@ -238,9 +250,10 @@ class OnboardingViewModel: ObservableObject {
                 detail: hermesInfo.version,
                 error: hermesInfo.installed ? nil : "未安装 Hermes 引擎"
             ))
+            DMLogger.log("[EnvCheck] Hermes 引擎检测完成: installed=\(hermesInfo.installed), version=\(hermesInfo.version ?? "nil")", name: "OnboardingViewModel")
 
             // disk — 检查磁盘可用空间（至少 2GB）
-            DMLogger.log("检测磁盘空间...", name: "OnboardingViewModel")
+            DMLogger.log("[EnvCheck] 开始检测磁盘空间...", name: "OnboardingViewModel")
             let diskInfo = self.checkDiskSpace()
             results.append(CheckResult(
                 id: "disk",
@@ -248,9 +261,10 @@ class OnboardingViewModel: ObservableObject {
                 detail: diskInfo.detail,
                 error: diskInfo.sufficient ? nil : "磁盘空间不足"
             ))
+            DMLogger.log("[EnvCheck] 磁盘空间检测完成: \(diskInfo.detail), sufficient=\(diskInfo.sufficient)", name: "OnboardingViewModel")
 
             // gpu — 检查 GPU/硬件加速
-            DMLogger.log("检测 GPU 硬件加速...", name: "OnboardingViewModel")
+            DMLogger.log("[EnvCheck] 开始检测 GPU 硬件加速...", name: "OnboardingViewModel")
             let gpuInfo = self.checkGPU()
             results.append(CheckResult(
                 id: "gpu",
@@ -258,6 +272,7 @@ class OnboardingViewModel: ObservableObject {
                 detail: gpuInfo.detail,
                 error: nil
             ))
+            DMLogger.log("[EnvCheck] GPU 硬件加速检测完成: available=\(gpuInfo.available), detail=\(gpuInfo.detail ?? "nil")", name: "OnboardingViewModel")
 
             for r in results {
                 DMLogger.log("  \(r.id): passed=\(r.passed), detail=\(r.detail ?? "nil"), error=\(r.error ?? "nil")", name: "OnboardingViewModel")
@@ -280,24 +295,32 @@ class OnboardingViewModel: ObservableObject {
     }
 
     private func checkNetworkConnectivity() -> Bool {
+        DMLogger.log("[Network] 开始检测网络连通性 (https://www.apple.com)", name: "OnboardingViewModel")
         let group = DispatchGroup()
         var isConnected = false
 
-        guard let url = URL(string: "https://www.apple.com") else { return false }
+        guard let url = URL(string: "https://www.apple.com") else {
+            DMLogger.log("[Network] URL 构造失败", name: "OnboardingViewModel")
+            return false
+        }
         var request = URLRequest(url: url)
         request.timeoutInterval = 5
 
         group.enter()
         let task = URLSession.shared.dataTask(with: request) { _, response, error in
             defer { group.leave() }
-            if error != nil { return }
+            if let error = error {
+                DMLogger.log("[Network] 请求失败: \(error.localizedDescription)", name: "OnboardingViewModel")
+                return
+            }
             if let httpResponse = response as? HTTPURLResponse {
                 isConnected = (200...299).contains(httpResponse.statusCode)
+                DMLogger.log("[Network] HTTP 状态码: \(httpResponse.statusCode)", name: "OnboardingViewModel")
             }
         }
         task.resume()
-        _ = group.wait(timeout: .now() + 6)
-        DMLogger.log("网络检测结果: \(isConnected ? "已连接" : "未连接")", name: "OnboardingViewModel")
+        let waitResult = group.wait(timeout: .now() + 6)
+        DMLogger.log("[Network] 等待结果: \(waitResult == .success ? "success" : "timedOut"), 网络检测结果: \(isConnected ? "已连接" : "未连接")", name: "OnboardingViewModel")
         return isConnected
     }
 
@@ -316,6 +339,7 @@ class OnboardingViewModel: ObservableObject {
                 // 尝试获取版本号（文件存在即表示可用）
                 let versionOutput = runShell("'\(venvPythonPath)' --version 2>/dev/null")
                 let trimmed = versionOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+                DMLogger.log("Python 检测: venv python 版本输出=\(trimmed)", name: "OnboardingViewModel")
                 if !trimmed.isEmpty {
                     return (true, trimmed)
                 }
@@ -338,6 +362,7 @@ class OnboardingViewModel: ObservableObject {
                 DMLogger.log("Python 检测结果: 系统 python3 存在 \(path)", name: "OnboardingViewModel")
                 let versionOutput = runShell("'\(path)' --version 2>/dev/null")
                 let trimmed = versionOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+                DMLogger.log("Python 检测: 系统 python3 (\(path)) 版本输出=\(trimmed)", name: "OnboardingViewModel")
                 if !trimmed.isEmpty && trimmed.contains("Python") {
                     return (true, trimmed)
                 }
@@ -346,6 +371,7 @@ class OnboardingViewModel: ObservableObject {
         }
 
         // 3. 最后尝试 shell 命令（沙盒环境下可能失败）
+        DMLogger.log("Python 检测: 最后尝试 shell python3/python --version", name: "OnboardingViewModel")
         let output = runShell("python3 --version 2>/dev/null || python --version 2>/dev/null")
         let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
         let available = !trimmed.isEmpty && trimmed.contains("Python")
@@ -401,7 +427,7 @@ class OnboardingViewModel: ObservableObject {
     ///    后者在沙盒中可能错误返回 false）
     /// 2. 回退：检查 `~/.local/bin/hermes`（pip/uv 安装的 CLI 入口）
     /// 3. 回退：使用 shell 命令 `which hermes` 和 `hermes --version`
-    private func checkHermes(hermesHome: String? = nil) -> (installed: Bool, version: String?, configured: Bool, hasApiKey: Bool, hasModelConfigured: Bool, hermesHome: String?) {
+    func checkHermes(hermesHome: String? = nil) -> (installed: Bool, version: String?, configured: Bool, hasApiKey: Bool, hasModelConfigured: Bool, hermesHome: String?) {
         let home = hermesHome ?? resolveHermesHome()
         let fm = FileManager.default
 
@@ -428,8 +454,10 @@ class OnboardingViewModel: ObservableObject {
         if agentDirExists && scriptExists {
             installed = true
             // 尝试用 shell 获取版本号
+            DMLogger.log("checkHermes: 即将执行脚本版本检测: \(scriptPath)", name: "OnboardingViewModel")
             let versionOutput = runShell("'\(scriptPath)' --version 2>/dev/null")
             let trimmed = versionOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+            DMLogger.log("checkHermes: 脚本版本检测完成, output=\(trimmed)", name: "OnboardingViewModel")
             if !trimmed.isEmpty {
                 versionStr = trimmed
                 DMLogger.log("checkHermes: 脚本版本: \(trimmed)", name: "OnboardingViewModel")
@@ -439,24 +467,29 @@ class OnboardingViewModel: ObservableObject {
         // 方式2：检查 ~/.local/bin/hermes（pip/uv 全局安装）
         if !installed {
             let localBinPath = realHomeDirectory() + "/.local/bin/hermes"
+            DMLogger.log("checkHermes: 检查 local bin: \(localBinPath)", name: "OnboardingViewModel")
             if fm.fileExists(atPath: localBinPath) {
                 installed = true
                 DMLogger.log("checkHermes: found \(localBinPath)", name: "OnboardingViewModel")
                 let versionOutput = runShell("'\(localBinPath)' --version 2>/dev/null")
                 let trimmed = versionOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+                DMLogger.log("checkHermes: local bin 版本检测完成, output=\(trimmed)", name: "OnboardingViewModel")
                 if !trimmed.isEmpty { versionStr = trimmed }
             }
         }
 
         // 方式3：回退到 shell (which hermes / hermes --version)
         if !installed {
+            DMLogger.log("checkHermes: 即将执行 which hermes", name: "OnboardingViewModel")
             let whichOutput = runShell("which hermes 2>/dev/null")
             let whichPath = whichOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+            DMLogger.log("checkHermes: which hermes 完成, path=\(whichPath)", name: "OnboardingViewModel")
             if !whichPath.isEmpty {
                 installed = true
                 DMLogger.log("checkHermes: which hermes = \(whichPath)", name: "OnboardingViewModel")
                 let versionOutput = runShell("hermes --version 2>/dev/null")
                 let trimmed = versionOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+                DMLogger.log("checkHermes: hermes --version 完成, output=\(trimmed)", name: "OnboardingViewModel")
                 if !trimmed.isEmpty { versionStr = trimmed }
             }
         }
@@ -574,13 +607,19 @@ class OnboardingViewModel: ObservableObject {
 
         DMLogger.log("checkConfigYamlForModel: configPath=\(configPath)", name: "OnboardingViewModel")
 
-        // 使用 shell 读取（沙盒环境下 FileManager 可能无法访问 ~/.hermes/）
-        let content = runShell("cat '\(configPath)' 2>/dev/null")
-        DMLogger.log("checkConfigYamlForModel: shell 读取结果长度=\(content.count), isEmpty=\(content.isEmpty)", name: "OnboardingViewModel")
-
-        if content.isEmpty {
-            DMLogger.log("checkConfigYamlForModel: shell cat 返回空，config.yaml 不存在或无法读取", name: "OnboardingViewModel")
-            return false
+        // 优先使用 FileManager 直接读取，避免 shell cat 因管道阻塞导致超时。
+        let content: String
+        if let data = FileManager.default.contents(atPath: configPath),
+           let str = String(data: data, encoding: .utf8), !str.isEmpty {
+            content = str
+            DMLogger.log("checkConfigYamlForModel: FileManager 读取结果长度=\(content.count)", name: "OnboardingViewModel")
+        } else {
+            DMLogger.log("checkConfigYamlForModel: FileManager 读取失败，尝试 shell 读取", name: "OnboardingViewModel")
+            content = runShell("cat '\(configPath)' 2>/dev/null")
+            if content.isEmpty {
+                DMLogger.log("checkConfigYamlForModel: shell cat 返回空，config.yaml 不存在或无法读取", name: "OnboardingViewModel")
+                return false
+            }
         }
 
         // 打印前 500 字符用于调试
@@ -660,8 +699,10 @@ class OnboardingViewModel: ObservableObject {
 
     private func checkGPU() -> (available: Bool, detail: String?) {
         // 通过 system_profiler 获取 GPU 信息
+        DMLogger.log("GPU 检测: 开始执行 system_profiler", name: "OnboardingViewModel")
         let output = runShell("system_profiler SPDisplaysDataType 2>/dev/null | grep 'Chipset Model' | awk -F': ' '{print $2}'")
         let gpuName = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        DMLogger.log("GPU 检测: system_profiler 输出=\(gpuName)", name: "OnboardingViewModel")
         if !gpuName.isEmpty {
             DMLogger.log("GPU 检测结果: \(gpuName)", name: "OnboardingViewModel")
             return (true, gpuName)
@@ -679,17 +720,63 @@ class OnboardingViewModel: ObservableObject {
         return (!machine.isEmpty, "Apple \(machine)")
     }
 
-    private func runShell(_ command: String) -> String {
+    private func runShell(_ command: String, timeout: TimeInterval = 10) -> String {
+        DMLogger.log("[runShell] 开始执行 (timeout=\(timeout)s): \(command)", name: "OnboardingViewModel")
+        let start = Date()
+
         let task = Process()
         task.launchPath = "/bin/bash"
         task.arguments = ["-c", command]
         let pipe = Pipe()
         task.standardOutput = pipe
         task.standardError = FileHandle.nullDevice
-        task.launch()
-        task.waitUntilExit()
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        return String(data: data, encoding: .utf8) ?? ""
+
+        // 使用 readabilityHandler 异步累积输出，避免超时后 readDataToEndOfFile 阻塞。
+        var outputData = Data()
+        let outputLock = NSLock()
+        let pipeHandle = pipe.fileHandleForReading
+        pipeHandle.readabilityHandler = { handle in
+            let data = handle.availableData
+            outputLock.lock()
+            if !data.isEmpty {
+                outputData.append(data)
+            }
+            outputLock.unlock()
+        }
+
+        do {
+            try task.run()
+        } catch {
+            DMLogger.log("[runShell] 启动失败: \(error.localizedDescription), command=\(command)", name: "OnboardingViewModel")
+            pipeHandle.readabilityHandler = nil
+            return ""
+        }
+
+        // 在后台等待进程退出，避免 waitUntilExit 永远阻塞当前线程
+        let group = DispatchGroup()
+        group.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            task.waitUntilExit()
+            group.leave()
+        }
+
+        if group.wait(timeout: .now() + timeout) == .timedOut {
+            DMLogger.log("[runShell] 超时 \(timeout)s，终止任务: \(command)", name: "OnboardingViewModel")
+            task.terminate()
+            _ = group.wait(timeout: .now() + 2)
+        }
+
+        // 移除 handler 并关闭读取端，确保后续不再阻塞。
+        pipeHandle.readabilityHandler = nil
+        try? pipeHandle.close()
+
+        outputLock.lock()
+        let output = String(data: outputData, encoding: .utf8) ?? ""
+        outputLock.unlock()
+
+        let elapsed = Date().timeIntervalSince(start)
+        DMLogger.log("[runShell] 完成: 耗时=\(String(format: "%.2f", elapsed))s, 退出码=\(task.terminationStatus), 输出长度=\(output.count), command=\(command)", name: "OnboardingViewModel")
+        return output
     }
 
     /// 使用 shell 检测文件是否存在（沙盒环境下 FileManager 可能无法访问 ~/.hermes/）
@@ -707,6 +794,8 @@ class OnboardingViewModel: ObservableObject {
 
         setCancelled(false)
         installMilestone = 0.0
+        lastMilestoneTime = installStartTime
+        lastMilestoneValue = 0.0
         setInstallProcess(nil)
 
         model.isInstalling = true
@@ -714,6 +803,7 @@ class OnboardingViewModel: ObservableObject {
         model.installError = nil
         model.isDownloadSlow = false
         model.showMirrorPrompt = false
+        model.showInitialMirrorPrompt = false
         model.installStartTime = installStartTime
         model.mirrorUrl = mirrorUrl
         model.downloadProgress = 0.0
@@ -727,7 +817,8 @@ class OnboardingViewModel: ObservableObject {
         startSlowDownloadDetection()
 
         // 在后台运行真实安装（官方 install.sh + 流式输出）
-        Task { [weak self] in
+        // 使用 Task.detached 避免继承主 actor，否则 runShell 中的 waitUntilExit 会阻塞主线程导致 UI 卡死。
+        Task.detached { [weak self] in
             await self?.runInstallation(mirrorUrl: mirrorUrl)
         }
     }
@@ -802,13 +893,20 @@ class OnboardingViewModel: ObservableObject {
         env["PATH"] = expandedPath
         DMLogger.log("[OnboardingVM] 扩展后 PATH=\(expandedPath)", name: "OnboardingViewModel")
 
-        if let mirror = mirrorUrl, !mirror.isEmpty {
+        let useMirror = mirrorUrl != nil && !mirrorUrl!.isEmpty
+        let installScriptUrl = useMirror ? kHermesChinaInstallUrl : kHermesOfficialInstallUrl
+
+        if useMirror, let mirror = mirrorUrl {
             // git ≥2.31 支持 GIT_CONFIG_COUNT / GIT_CONFIG_KEY_n / GIT_CONFIG_VALUE_n
-            // 把 https://github.com/... 重写为 <mirror>/https://github.com/...
+            // 把 https://github.com/... 重写为 <mirror>...
             env["GIT_CONFIG_COUNT"] = "1"
-            env["GIT_CONFIG_KEY_0"] = "url.\(mirror)/https://github.com/.insteadOf"
+            env["GIT_CONFIG_KEY_0"] = "url.\(mirror).insteadOf"
             env["GIT_CONFIG_VALUE_0"] = "https://github.com/"
-            DMLogger.log("[OnboardingVM] 已注入进程级 git insteadOf 镜像: \(mirror)", name: "OnboardingViewModel")
+            // pip / uv 国内镜像加速 Python 依赖下载
+            env["PIP_INDEX_URL"] = kDefaultPipIndexUrl
+            env["UV_INDEX_URL"] = kDefaultPipIndexUrl
+            env["PIP_TRUSTED_HOST"] = "pypi.tuna.tsinghua.edu.cn"
+            DMLogger.log("[OnboardingVM] 已注入进程级国内镜像: git=\(mirror), pip=\(kDefaultPipIndexUrl)", name: "OnboardingViewModel")
         }
 
         // ---- 阶段 3: 流式运行官方安装脚本 ----
@@ -817,7 +915,7 @@ class OnboardingViewModel: ObservableObject {
         // --skip-setup 跳过交互式 setup 向导（模型配置由第 3 步 onboarding 负责）；
         // --non-interactive 跳过需要用户输入的阶段（如 sudo 提示）。
         reportMilestone(0.15, stage: "正在运行官方安装脚本", item: "拉取并执行 install.sh")
-        let argv = "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-setup --non-interactive"
+        let argv = "curl -fsSL \(installScriptUrl) | bash -s -- --skip-setup --non-interactive"
         DMLogger.log("[OnboardingVM] 阶段3: 运行官方安装脚本", name: "OnboardingViewModel")
 
         do {
@@ -835,6 +933,11 @@ class OnboardingViewModel: ObservableObject {
                 }
             )
             setInstallProcess(nil)
+
+            // 官方 install.sh 未把 aiohttp 装入 venv，会导致 Gateway API server 无法启动，
+            // 因此在 install.sh 成功后显式补充安装。
+            await installAiohttpIfNeeded(hermesHome: hermesHome, useMirror: useMirror)
+
             finishInstall(result: result, hermesHome: hermesHome)
         } catch {
             setInstallProcess(nil)
@@ -843,6 +946,70 @@ class OnboardingViewModel: ObservableObject {
                 failInstall("启动安装脚本失败：\(error.localizedDescription)")
             }
         }
+    }
+
+    /// 官方 install.sh 没有安装 aiohttp，导致 Gateway API server 无法启动。
+    /// 在 install.sh 成功后显式补充安装到 Hermes venv，并沿用用户选择的国内镜像。
+    ///
+    /// 兼容 uv 创建的 venv（无 pip）：优先用 venv pip，否则用系统 uv，
+    /// 再兜底尝试 ensurepip。所有命令保留 stderr，便于诊断失败原因。
+    private func installAiohttpIfNeeded(hermesHome: String, useMirror: Bool) async {
+        let venvPip = "\(hermesHome)/hermes-agent/venv/bin/pip"
+        let venvPython = "\(hermesHome)/hermes-agent/venv/bin/python"
+        let fm = FileManager.default
+
+        await MainActor.run { [weak self] in
+            self?.model.installStageLabel = "正在安装 Gateway 网络依赖..."
+            self?.model.currentDownloadingItem = "aiohttp"
+        }
+
+        // 1) venv pip 可用：直接用 pip install
+        if fm.isExecutableFile(atPath: venvPip),
+           runShell("'\(venvPip)' --version 2>&1").lowercased().contains("pip") {
+            let base = "'\(venvPip)' install aiohttp"
+            let command = useMirror
+                ? "PIP_INDEX_URL='\(kDefaultPipIndexUrl)' PIP_TRUSTED_HOST='pypi.tuna.tsinghua.edu.cn' \(base)"
+                : base
+            DMLogger.log("[OnboardingVM] installAiohttpIfNeeded (venv pip): \(command)", name: "OnboardingViewModel")
+            let output = runShell(command, timeout: 120)
+            DMLogger.log("[OnboardingVM] installAiohttpIfNeeded (venv pip) 完成，输出长度=\(output.count)", name: "OnboardingViewModel")
+            return
+        }
+
+        // 2) venv 由 uv 创建，无 pip：使用系统 uv 安装到该 venv
+        let systemUvCandidates = [
+            NSHomeDirectory() + "/.local/bin/uv",
+            "/opt/homebrew/bin/uv",
+            "/usr/local/bin/uv"
+        ]
+        if let systemUv = systemUvCandidates.first(where: { fm.isExecutableFile(atPath: $0) }),
+           runShell("'\(systemUv)' --version 2>&1").lowercased().contains("uv") {
+            let base = "'\(systemUv)' pip install --python '\(venvPython)' aiohttp"
+            let command = useMirror
+                ? "UV_INDEX_URL='\(kDefaultPipIndexUrl)' \(base)"
+                : base
+            DMLogger.log("[OnboardingVM] installAiohttpIfNeeded (uv): \(command)", name: "OnboardingViewModel")
+            let output = runShell(command, timeout: 120)
+            DMLogger.log("[OnboardingVM] installAiohttpIfNeeded (uv) 完成，输出长度=\(output.count)", name: "OnboardingViewModel")
+            return
+        }
+
+        // 3) 兜底：venv python + ensurepip，再安装 aiohttp
+        guard fm.isExecutableFile(atPath: venvPython) else {
+            DMLogger.log("[OnboardingVM] installAiohttpIfNeeded: 未找到 venv python，跳过", name: "OnboardingViewModel")
+            return
+        }
+        DMLogger.log("[OnboardingVM] installAiohttpIfNeeded: 尝试 ensurepip 安装 pip", name: "OnboardingViewModel")
+        let ensurepipOutput = runShell("'\(venvPython)' -m ensurepip --default-pip 2>&1", timeout: 120)
+        DMLogger.log("[OnboardingVM] installAiohttpIfNeeded ensurepip 输出长度=\(ensurepipOutput.count)", name: "OnboardingViewModel")
+
+        let base = "'\(venvPython)' -m pip install aiohttp"
+        let command = useMirror
+            ? "PIP_INDEX_URL='\(kDefaultPipIndexUrl)' PIP_TRUSTED_HOST='pypi.tuna.tsinghua.edu.cn' \(base)"
+            : base
+        DMLogger.log("[OnboardingVM] installAiohttpIfNeeded (ensurepip fallback): \(command)", name: "OnboardingViewModel")
+        let output = runShell(command, timeout: 120)
+        DMLogger.log("[OnboardingVM] installAiohttpIfNeeded (ensurepip fallback) 完成，输出长度=\(output.count)", name: "OnboardingViewModel")
     }
 
     /// 预置 ~/.hermes/bin/uv 符号链接，绕过 astral.sh 安装器在系统已有 uv 时的 bug
@@ -909,18 +1076,29 @@ class OnboardingViewModel: ObservableObject {
             self.model.installLogTail = logTail
             self.model.downloadSpeed = "实时安装中"
             self.model.estimatedTime = "已用 \(elapsed)s"
-            if candidate > self.installMilestone {
-                self.installMilestone = candidate
-                self.model.downloadProgress = candidate
-                self.model.installStageLabel = Self.milestoneStageLabel(candidate)
-                DMLogger.log("[OnboardingVM] 进度推进到 \(candidate), item=\(lastLine)", name: "OnboardingViewModel")
+
+            let newMilestone = max(candidate, self.installMilestone)
+            if newMilestone > self.installMilestone {
+                self.installMilestone = newMilestone
+                self.lastMilestoneTime = Date()
+                self.lastMilestoneValue = newMilestone
+                self.model.downloadProgress = newMilestone
+                self.model.installStageLabel = Self.milestoneStageLabel(newMilestone)
+                DMLogger.log("[OnboardingVM] 进度推进到 \(newMilestone), item=\(lastLine)", name: "OnboardingViewModel")
                 // 进度越过阈值后取消慢速检测
-                if candidate > kSlowDownloadProgressThreshold {
+                if newMilestone > kSlowDownloadProgressThreshold {
                     self.slowDownloadTimer?.invalidate()
                     if self.model.isDownloadSlow {
                         self.model.isDownloadSlow = false
                         DMLogger.log("[OnboardingVM] 下载已加速，隐藏慢速提示", name: "OnboardingViewModel")
                     }
+                }
+            } else {
+                // 长时间未命中新 milestone 时，在当前区间内平滑前进，避免进度条卡住。
+                let timeSinceMilestone = Date().timeIntervalSince(self.lastMilestoneTime)
+                let smoothed = Self.smoothProgress(base: self.lastMilestoneValue, elapsed: timeSinceMilestone)
+                if smoothed > self.model.downloadProgress {
+                    self.model.downloadProgress = smoothed
                 }
             }
         }
@@ -930,28 +1108,61 @@ class OnboardingViewModel: ObservableObject {
     /// 大小写不敏感；进度单调递增由调用方保证。
     private func milestoneForLine(_ raw: String) -> Double {
         let line = raw.lowercased()
-        // 0.95 必须先于 0.70 判定，避免 "installation complete" 被 "installing" 档截获
+        // 最终完成/验证阶段：必须放在最前，避免被后面的 "installing" 等误截获
         if (line.contains("complete") && (line.contains("install") || line.contains("hermes")))
+            || line.contains("installation successful")
+            || line.contains("hermes installed")
             || line.contains("symlink") || line.contains("added to path")
             || line.contains("✓ hermes") || line.contains("✓ install") {
             return 0.95
         }
-        if line.contains("node") || line.contains("playwright") || line.contains("browser")
-            || line.contains("ripgrep") || line.contains("ffmpeg") || line.contains("npm") {
-            return 0.85
+        // 浏览器/Node/多媒体工具依赖
+        if line.contains("playwright") || line.contains("chromium") || line.contains("browser")
+            || line.contains("ripgrep") || line.contains("ffmpeg")
+            || line.contains("npm install") || line.contains("node_modules") {
+            return 0.90
         }
-        if line.contains("pip") || line.contains("installing") || line.contains("dependencies") {
+        // Node/npm 准备
+        if line.contains("node") || line.contains("npm") || line.contains("npx") {
+            return 0.80
+        }
+        // Python 依赖安装
+        if line.contains("pip install") || line.contains("requirements")
+            || line.contains("resolving dependencies") || line.contains("dependencies installed")
+            || (line.contains("installing") && (line.contains("python") || line.contains("package"))) {
             return 0.70
         }
-        if line.contains("venv") || line.contains("virtual environment")
-            || line.contains("uv") || line.contains("python 3.11") || line.contains("python3.11") {
-            return 0.40
+        // Python venv / uv 环境创建
+        if line.contains("creating venv") || line.contains("venv created")
+            || line.contains("virtual environment") || line.contains("uv sync")
+            || line.contains("uv venv") || line.contains("python 3.11") || line.contains("python3.11") {
+            return 0.55
         }
+        // 仓库克隆完成
+        if line.contains("cloned") || line.contains("clone complete")
+            || line.contains("repository ready") || line.contains("done cloning") {
+            return 0.35
+        }
+        // 仓库克隆/下载
         if line.contains("cloning") || line.contains("git clone")
-            || line.contains("download hermes") || line.contains("repository") {
+            || line.contains("download hermes") || line.contains("fetching repository")
+            || line.contains("repository") {
             return 0.15
         }
         return 0.0
+    }
+
+    /// 在当前 milestone 区间内做基于时间的平滑增长，避免进度条长时间停滞。
+    private static func smoothProgress(base: Double, elapsed: TimeInterval) -> Double {
+        let milestones = progressMilestones
+        guard let upperIndex = milestones.firstIndex(where: { $0 > base }), upperIndex > 0 else {
+            return base
+        }
+        let upper = milestones[upperIndex]
+        let range = upper - base
+        // 每 30 秒在当前区间内前进 80%，接近下一 milestone 但不超过它。
+        let fillRatio = min(elapsed / 30.0, 1.0) * 0.8
+        return min(base + range * fillRatio, upper - 0.001)
     }
 
     /// 安装脚本结束后的成败判定。
@@ -1047,6 +1258,8 @@ class OnboardingViewModel: ObservableObject {
             guard let self = self else { return }
             if progress > self.installMilestone {
                 self.installMilestone = progress
+                self.lastMilestoneTime = Date()
+                self.lastMilestoneValue = progress
                 self.model.downloadProgress = progress
             }
             self.model.installStageLabel = stage
@@ -1110,6 +1323,22 @@ class OnboardingViewModel: ObservableObject {
         model.showMirrorPrompt = false
     }
 
+    // MARK: - Initial Mirror Prompt
+
+    /// 环境检测后发现缺少依赖，弹出 Alert 让用户选择使用国内镜像还是官方地址。
+    func promptForMirrorThenInstall() {
+        DMLogger.log("[OnboardingVM] promptForMirrorThenInstall: 显示镜像选择弹窗", name: "OnboardingViewModel")
+        model.showInitialMirrorPrompt = true
+    }
+
+    /// 用户在国内镜像弹窗中做出选择后开始安装。
+    func startInstallationWithMirrorChoice(useMirror: Bool) {
+        let mirrorUrl = useMirror ? kDefaultGithubMirror : nil
+        DMLogger.log("[OnboardingVM] startInstallationWithMirrorChoice: useMirror=\(useMirror), mirrorUrl=\(mirrorUrl ?? "nil")", name: "OnboardingViewModel")
+        model.showInitialMirrorPrompt = false
+        startInstallation(mirrorUrl: mirrorUrl)
+    }
+
     /// 取消正在进行的下载/安装：真正终止 install.sh 子进程，并给出可重试状态。
     func cancelDownload() {
         DMLogger.log("[OnboardingVM] cancelDownload: 用户取消了下载", name: "OnboardingViewModel")
@@ -1143,6 +1372,7 @@ class OnboardingViewModel: ObservableObject {
         model.downloadProgress = 0.0
         model.isDownloadSlow = false
         model.showMirrorPrompt = false
+        model.showInitialMirrorPrompt = false
         model.currentDownloadingItem = nil
         model.installLogTail = nil
         startInstallation(mirrorUrl: model.mirrorUrl)
@@ -1190,9 +1420,85 @@ class OnboardingViewModel: ObservableObject {
         model.apiKey = key
     }
 
-    /// 设置宠物性格文件。
+    /// 设置宠物性格文件（兼容旧字段，实际 personality 由 SOUL.md 控制）。
     func setPetPersonalityFile(_ fileName: String?) {
         model.petPersonalityFile = fileName
+    }
+
+    /// 读取当前 ~/.hermes/SOUL.md 内容到 model。
+    func loadSoulFile() {
+        guard !model.isSoulFileLoading else { return }
+        model.isSoulFileLoading = true
+        model.soulFileError = nil
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            do {
+                let content = try MemoryFileStore().readSoulFile()
+                DispatchQueue.main.async {
+                    self.model.soulFileContent = content
+                    self.model.isSoulFileLoading = false
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.model.soulFileContent = nil
+                    self.model.soulFileError = error.localizedDescription
+                    self.model.isSoulFileLoading = false
+                    DMLogger.error("读取 SOUL.md 失败: \(error.localizedDescription)", name: "OnboardingViewModel")
+                }
+            }
+        }
+    }
+
+    /// 用户选择了一个本地 .md 文件，校验格式并立即替换 SOUL.md。
+    func selectSoulFile(_ url: URL) {
+        guard url.pathExtension.lowercased() == "md" else {
+            model.soulFileError = "仅支持 .md 格式的文件"
+            DMLogger.log("用户选择了非 md 文件: \(url.pathExtension)", name: "OnboardingViewModel")
+            return
+        }
+        model.soulFileURL = url
+        model.soulFileError = nil
+        replaceSoulFile(with: url)
+    }
+
+    /// 清除用户选择的 SOUL.md 替换文件。
+    func clearSoulFile() {
+        model.soulFileURL = nil
+        model.petPersonalityFile = nil
+        model.soulFileError = nil
+    }
+
+    /// 显示/隐藏 SOUL.md 内容预览弹窗。
+    func toggleSoulPreview() {
+        model.showSoulPreview.toggle()
+    }
+
+    /// 将用户选择的 .md 文件内容写入 ~/.hermes/SOUL.md。
+    private func replaceSoulFile(with url: URL) {
+        model.isSoulFileLoading = true
+        model.soulFileError = nil
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            do {
+                let content = try String(contentsOf: url, encoding: .utf8)
+                try MemoryFileStore().writeSoulFile(content)
+                DispatchQueue.main.async {
+                    self.model.soulFileContent = content
+                    self.model.petPersonalityFile = url.lastPathComponent
+                    self.model.isSoulFileLoading = false
+                    self.model.soulFileError = nil
+                    DMLogger.log("SOUL.md 已通过 onboarding 替换为: \(url.path)", name: "OnboardingViewModel")
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.model.isSoulFileLoading = false
+                    self.model.soulFileError = "替换 SOUL.md 失败: \(error.localizedDescription)"
+                    DMLogger.error("替换 SOUL.md 失败: \(error.localizedDescription)", name: "OnboardingViewModel")
+                }
+            }
+        }
     }
 
     // MARK: - Complete Onboarding

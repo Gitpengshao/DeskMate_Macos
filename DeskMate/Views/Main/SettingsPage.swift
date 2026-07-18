@@ -5,6 +5,7 @@ import Speech
 /// 设置页面 — 展示版本号、桌宠大小与悬浮透明等配置项。
 struct SettingsPage: View {
     @StateObject private var settings = SettingsManager.shared
+    @StateObject private var hermesManager = HermesManagementViewModel()
 
     @StateObject private var errorPresenter = VoiceShortcutErrorPresenter.shared
 
@@ -20,6 +21,9 @@ struct SettingsPage: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 versionSection
+                Divider()
+                    .background(Palette.border)
+                hermesSection
                 Divider()
                     .background(Palette.border)
                 petSizeSection
@@ -59,6 +63,63 @@ struct SettingsPage: View {
         } message: {
             Text(errorPresenter.message ?? "")
         }
+        .sheet(isPresented: $hermesManager.showLogSheet) {
+            logSheet
+        }
+        .alert("选择下载源", isPresented: $hermesManager.showMirrorAlert) {
+            Button("国内镜像加速") {
+                hermesManager.confirmUpdate(useMirror: true)
+            }
+            Button("官方原始地址") {
+                hermesManager.confirmUpdate(useMirror: false)
+            }
+            Button("取消", role: .cancel) {
+                hermesManager.showMirrorAlert = false
+            }
+        } message: {
+            Text("更新 Hermes 需要拉取最新代码与依赖。建议中国大陆用户选择国内镜像加速，否则可能因网络问题导致更新缓慢或失败。")
+        }
+        .alert("确认", isPresented: confirmAlertBinding, presenting: hermesManager.confirmAlert) { alert in
+            Button(alert.confirmButton, role: .destructive) {
+                switch alert {
+                case .uninstall:
+                    hermesManager.performUninstall()
+                case .clearData:
+                    hermesManager.performClearData()
+                }
+            }
+        } message: { alert in
+            Text(alert.message)
+        }
+        .alert(hermesManager.resultAlert?.title ?? "", isPresented: resultAlertBinding, presenting: hermesManager.resultAlert) { alert in
+            if alert.shouldRestart {
+                Button("立即重启") {
+                    hermesManager.restartApp()
+                }
+            } else {
+                Button("确定") {
+                    hermesManager.resultAlert = nil
+                }
+            }
+        } message: { alert in
+            Text(alert.message)
+        }
+    }
+
+    // MARK: - Alert Bindings
+
+    private var confirmAlertBinding: Binding<Bool> {
+        Binding<Bool>(
+            get: { hermesManager.confirmAlert != nil },
+            set: { if !$0 { hermesManager.confirmAlert = nil } }
+        )
+    }
+
+    private var resultAlertBinding: Binding<Bool> {
+        Binding<Bool>(
+            get: { hermesManager.resultAlert != nil },
+            set: { if !$0 { hermesManager.resultAlert = nil } }
+        )
     }
 
     // MARK: - Version Section
@@ -95,6 +156,125 @@ struct SettingsPage: View {
             )
             .cornerRadius(10)
         }
+    }
+
+    // MARK: - Hermes Section
+
+    private var hermesSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("Hermes")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(Palette.textPrimary)
+
+                Spacer()
+
+                HStack(spacing: 6) {
+                    if hermesManager.isLoadingStatus {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("检测中...")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(Palette.textSecond)
+                    } else {
+                        Circle()
+                            .fill(hermesManager.isHermesInstalled ? Color(red: 0.30, green: 0.85, blue: 0.40) : Color(red: 0.95, green: 0.30, blue: 0.30))
+                            .frame(width: 6, height: 6)
+
+                        Text(hermesManager.isHermesInstalled ? (hermesManager.hermesVersion ?? "已安装") : "未安装")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(Palette.textSecond)
+                    }
+                }
+            }
+
+            HStack(spacing: 12) {
+                Button("更新 Hermes") {
+                    hermesManager.startUpdate()
+                }
+                .buttonStyle(HermesActionButtonStyle())
+                .disabled(!hermesManager.isHermesInstalled || hermesManager.isRunning)
+
+                Button("卸载 Hermes") {
+                    hermesManager.requestUninstall()
+                }
+                .buttonStyle(HermesActionButtonStyle(role: .secondary))
+                .disabled(hermesManager.isRunning)
+
+                Button("清除全部数据") {
+                    hermesManager.requestClearData()
+                }
+                .buttonStyle(HermesActionButtonStyle(role: .destructive))
+                .disabled(hermesManager.isRunning)
+
+                Spacer()
+            }
+
+            Text("更新 Hermes 会拉取最新代码并重启 gateway；卸载将移除 Hermes 程序文件；清除数据会删除 ~/.hermes 下的所有配置与记忆。")
+                .font(.system(size: 11))
+                .foregroundColor(Palette.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // MARK: - Log Sheet
+
+    private var logSheet: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(hermesManager.currentOperation?.rawValue ?? "操作日志")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(Palette.textPrimary)
+
+                Spacer()
+
+                if hermesManager.isRunning {
+                    ProgressView()
+                        .controlSize(.small)
+                        .padding(.trailing, 8)
+                }
+
+                Button("关闭") {
+                    hermesManager.dismissLogSheet()
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(Palette.textSecond)
+                .disabled(hermesManager.isRunning)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(Palette.bgPanel)
+
+            Divider()
+                .background(Palette.border)
+
+            ScrollView {
+                Text(hermesManager.logText)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(Palette.textSecond)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+            }
+            .background(Palette.bgBase)
+
+            Divider()
+                .background(Palette.border)
+
+            HStack {
+                Spacer()
+
+                if hermesManager.isRunning {
+                    Button("取消") {
+                        hermesManager.cancelOperation()
+                    }
+                    .buttonStyle(HermesActionButtonStyle(role: .secondary))
+                }
+            }
+            .padding(12)
+            .background(Palette.bgPanel)
+        }
+        .frame(width: 560, height: 380)
+        .background(Palette.bgPanel)
     }
 
     // MARK: - Pet Size Section
@@ -319,6 +499,52 @@ struct SettingsPage: View {
         let urlString = "x-apple.systempreferences:com.apple.preference.keyboard?Dictation"
         if let url = URL(string: urlString) {
             NSWorkspace.shared.open(url)
+        }
+    }
+}
+
+// MARK: - Hermes Action Button Style
+
+private struct HermesActionButtonStyle: ButtonStyle {
+    enum Role {
+        case primary
+        case secondary
+        case destructive
+    }
+
+    let role: Role
+
+    init(role: Role = .primary) {
+        self.role = role
+    }
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 12, weight: .medium))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(backgroundColor.opacity(configuration.isPressed ? 0.7 : 1.0))
+            .foregroundColor(foregroundColor)
+            .cornerRadius(6)
+    }
+
+    private var backgroundColor: Color {
+        switch role {
+        case .primary:
+            return Palette.textPrimary
+        case .secondary:
+            return Palette.border
+        case .destructive:
+            return Color(red: 0.95, green: 0.30, blue: 0.30)
+        }
+    }
+
+    private var foregroundColor: Color {
+        switch role {
+        case .primary:
+            return Palette.bgBase
+        case .secondary, .destructive:
+            return Palette.textPrimary
         }
     }
 }

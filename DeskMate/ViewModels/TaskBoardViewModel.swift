@@ -455,6 +455,84 @@ final class TaskBoardViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Task Detail
+
+    /// 加载任务完整详情（show + comments + history + runs），合并到本地 task。
+    func loadTaskDetail(_ taskId: String) async {
+        DMLogger.log(
+            "[TaskBoardVM] loadTaskDetail \(taskId)",
+            name: "TaskBoardVM"
+        )
+
+        let showTask = await Task {
+            let result = try? await service.getKanbanShow(taskId: taskId)
+            return result.map { TaskItem.fromJson($0) }
+        }.value
+
+        let comments = await Task {
+            guard let result = try? await service.getKanbanComments(taskId: taskId) else { return [TaskComment]() }
+            let arr: [[String: Any]] = {
+                if let data = result["data"] as? [[String: Any]] { return data }
+                if let data = result["comments"] as? [[String: Any]] { return data }
+                return []
+            }()
+            return arr.map { TaskComment.fromJson($0) }
+        }.value
+
+        let history = await Task {
+            guard let result = try? await service.getKanbanHistory(taskId: taskId) else { return [TaskEvent]() }
+            let arr: [[String: Any]] = {
+                if let data = result["data"] as? [[String: Any]] { return data }
+                if let data = result["history"] as? [[String: Any]] { return data }
+                if let data = result["events"] as? [[String: Any]] { return data }
+                return []
+            }()
+            return arr.map { TaskEvent.fromJson($0, taskId: taskId) }
+        }.value
+
+        let runs = await Task {
+            guard let result = try? await service.getKanbanRuns(taskId: taskId) else { return [TaskRun]() }
+            let arr: [[String: Any]] = {
+                if let data = result["data"] as? [[String: Any]] { return data }
+                if let data = result["runs"] as? [[String: Any]] { return data }
+                return []
+            }()
+            return arr.map { TaskRun.fromJson($0, taskId: taskId) }
+        }.value
+
+        let newTasks = model.tasks.map { t -> TaskItem in
+            guard t.id == taskId else { return t }
+            var updated = t
+            if let showTask = showTask {
+                updated = updated.updating(
+                    title: showTask.title,
+                    body: showTask.body,
+                    status: showTask.status,
+                    priority: showTask.priority,
+                    assignee: showTask.assignee,
+                    workspace: showTask.workspace,
+                    tenant: showTask.tenant,
+                    creator: showTask.creator,
+                    summary: showTask.summary,
+                    metadata: showTask.metadata,
+                    diagnosticLogs: showTask.diagnosticLogs,
+                    updatedAt: showTask.updatedAt
+                )
+            }
+            updated = updated.updating(
+                comments: comments.isEmpty ? updated.comments : comments,
+                runHistory: runs.isEmpty ? updated.runHistory : runs,
+                events: history.isEmpty ? updated.events : history
+            )
+            return updated
+        }
+        model = model.updating(tasks: newTasks)
+        DMLogger.log(
+            "[TaskBoardVM] loadTaskDetail \(taskId) → comments:\(comments.count), events:\(history.count), runs:\(runs.count)",
+            name: "TaskBoardVM"
+        )
+    }
+
     // MARK: - Run History
 
     /// 拉取任务运行历史(对齐官方 `kanban runs <id>`)并合并到 task.runHistory。

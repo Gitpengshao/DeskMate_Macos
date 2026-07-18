@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 单个 agent 办公桌：桌子、精灵动画、姓名、状态徽标、任务计数、当前 running 任务。
+/// 单个 agent 办公桌：桌子、精灵动画、任务文档卡片、姓名、状态徽标。
 struct AgentDeskView: View {
     let state: AgentOfficeState
     let onTaskTap: (String) -> Void
@@ -13,23 +13,33 @@ struct AgentDeskView: View {
 
     var body: some View {
         ZStack {
-            agentSprite
+            if state.isAgentPresent {
+                agentSprite
+            } else {
+                awayIndicator
+            }
+
             desk
+
+            if state.isAgentPresent {
+                documentCards
+            }
+
             statusDot
             nameLabel
-            taskBadges
-
-            if let task = state.runningTask {
-                runningTaskPill(task: task)
-                    .offset(y: -84)
-            }
 
             if isHovered {
                 hoverCard
-                    .offset(y: -120)
+                    .offset(y: -128)
             }
         }
         .frame(width: OfficeLayout.deskSize.width, height: OfficeLayout.deskSize.height)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if let task = state.runningTask ?? state.blockedTask ?? state.tasks.first {
+                onTaskTap(task.id)
+            }
+        }
         .onHover { hovering in
             isHovered = hovering
         }
@@ -45,6 +55,21 @@ struct AgentDeskView: View {
         )
         .offset(y: -28)
         .shadow(color: Color.black.opacity(0.15), radius: 4, x: 0, y: 2)
+    }
+
+    // MARK: - Away Indicator
+
+    private var awayIndicator: some View {
+        VStack(spacing: 4) {
+            Image(systemName: "person.slash.fill")
+                .font(.system(size: 24, weight: .medium))
+                .foregroundColor(OfficePalette.statusLeave)
+            Text("离席中")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(OfficePalette.textMuted)
+        }
+        .frame(width: spriteSize, height: spriteSize)
+        .offset(y: -28)
     }
 
     // MARK: - Desk
@@ -73,6 +98,62 @@ struct AgentDeskView: View {
                 .shadow(color: Color.black.opacity(0.12), radius: 5, x: 0, y: 3)
                 .offset(y: 38)
         }
+    }
+
+    // MARK: - Document Cards
+
+    private var documentCards: some View {
+        HStack(spacing: 4) {
+            ForEach(activeTasks.prefix(3)) { task in
+                documentCard(for: task)
+                    .onTapGesture {
+                        onTaskTap(task.id)
+                    }
+            }
+        }
+        .offset(y: 26)
+    }
+
+    private func documentCard(for task: TaskItem) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            RoundedRectangle(cornerRadius: 1)
+                .fill(statusColor(for: task.status))
+                .frame(height: 3)
+
+            Text(task.title)
+                .font(.system(size: 8, weight: .medium))
+                .foregroundColor(OfficePalette.textPrimary)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+
+            Spacer(minLength: 0)
+
+            HStack(spacing: 2) {
+                Circle()
+                    .fill(statusColor(for: task.status))
+                    .frame(width: 4, height: 4)
+                Text(task.status.label)
+                    .font(.system(size: 7))
+                    .foregroundColor(OfficePalette.textMuted)
+                    .lineLimit(1)
+            }
+        }
+        .padding(5)
+        .frame(width: 54, height: 38)
+        .background(
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color.white.opacity(0.9))
+                .shadow(color: Color.black.opacity(0.08), radius: 2, x: 0, y: 1)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(OfficePalette.deskShadow.opacity(0.5), lineWidth: 1)
+        )
+        .rotationEffect(.degrees(Double.random(in: -4...4, seed: task.id)))
+    }
+
+    private var activeTasks: [TaskItem] {
+        state.tasks.filter { $0.status != .archived }
     }
 
     // MARK: - Labels
@@ -106,37 +187,7 @@ struct AgentDeskView: View {
         }
     }
 
-    // MARK: - Task Badges
-
-    private var taskBadges: some View {
-        HStack(spacing: 6) {
-            badge(for: .todo, label: "待办")
-            badge(for: .ready, label: "就绪")
-            badge(for: .running, label: "进行中")
-            badge(for: .blocked, label: "阻塞")
-            badge(for: .done, label: "完成")
-        }
-        .offset(y: 116)
-    }
-
-    private func badge(for status: TaskStatus, label: String) -> some View {
-        let count = state.taskCounts[status] ?? 0
-        return Group {
-            if count > 0 {
-                Text("\(count)")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundColor(.white)
-                    .frame(minWidth: 16, minHeight: 16)
-                    .padding(.horizontal, 4)
-                    .background(
-                        Capsule()
-                            .fill(badgeColor(for: status))
-                    )
-            }
-        }
-    }
-
-    private func badgeColor(for status: TaskStatus) -> Color {
+    private func statusColor(for status: TaskStatus) -> Color {
         switch status {
         case .triage:  return Color.gray
         case .todo:    return Color(red: 0.231, green: 0.510, blue: 0.965)
@@ -148,74 +199,64 @@ struct AgentDeskView: View {
         }
     }
 
-    // MARK: - Running Task
-
-    private func runningTaskPill(task: TaskItem) -> some View {
-        Button {
-            onTaskTap(task.id)
-        } label: {
-            HStack(spacing: 4) {
-                Circle()
-                    .fill(OfficePalette.statusWork)
-                    .frame(width: 6, height: 6)
-                Text(task.title)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(OfficePalette.textPrimary)
-                    .lineLimit(1)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(
-                Capsule()
-                    .fill(Color.white.opacity(0.85))
-                    .overlay(
-                        Capsule()
-                            .stroke(OfficePalette.deskShadow, lineWidth: 1)
-                    )
-            )
-        }
-        .buttonStyle(.plain)
-    }
-
     // MARK: - Hover Status Card
 
     private var hoverCard: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(state.profile.displayTitle)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(OfficePalette.textPrimary)
-                .lineLimit(1)
-
-            HStack(spacing: 4) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
                 Circle()
                     .fill(statusColor)
-                    .frame(width: 6, height: 6)
-                Text(stateLabel)
-                    .font(.system(size: 11))
-                    .foregroundColor(OfficePalette.textPrimary)
-            }
-
-            Text("Gateway: \(state.profile.gatewayStatus.label)")
-                .font(.system(size: 10))
-                .foregroundColor(OfficePalette.textMuted)
-
-            if let task = state.runningTask {
-                Text("进行中：\(task.title)")
-                    .font(.system(size: 10))
+                    .frame(width: 8, height: 8)
+                Text(state.profile.displayTitle)
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(OfficePalette.textPrimary)
                     .lineLimit(1)
             }
 
-            HStack(spacing: 6) {
-                countPill(status: .todo, label: "待办")
-                countPill(status: .ready, label: "就绪")
-                countPill(status: .running, label: "进行中")
-                countPill(status: .blocked, label: "阻塞")
-                countPill(status: .done, label: "完成")
+            HStack(spacing: 4) {
+                Text(state.statusLabel)
+                    .font(.system(size: 11))
+                    .foregroundColor(OfficePalette.textPrimary)
+                Spacer()
+                Text("Gateway: \(state.profile.gatewayStatus.label)")
+                    .font(.system(size: 10))
+                    .foregroundColor(OfficePalette.textMuted)
+            }
+
+            if let task = state.runningTask ?? state.blockedTask {
+                Divider()
+                    .background(OfficePalette.deskShadow.opacity(0.4))
+                    .padding(.vertical, 2)
+
+                Text(task.title)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(OfficePalette.textPrimary)
+                    .lineLimit(1)
+
+                HStack(spacing: 6) {
+                    Text(task.status.label)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundColor(statusColor(for: task.status))
+                    if !task.priority.isEmpty {
+                        Text(task.priority)
+                            .font(.system(size: 9))
+                            .foregroundColor(OfficePalette.textMuted)
+                    }
+                }
+            }
+
+            if !activeTasks.isEmpty {
+                HStack(spacing: 6) {
+                    countPill(status: .todo, label: "待办")
+                    countPill(status: .ready, label: "就绪")
+                    countPill(status: .running, label: "进行中")
+                    countPill(status: .blocked, label: "阻塞")
+                    countPill(status: .done, label: "完成")
+                }
             }
         }
         .padding(10)
-        .frame(width: 180, alignment: .leading)
+        .frame(width: 190, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color.white.opacity(0.95))
@@ -227,22 +268,27 @@ struct AgentDeskView: View {
         )
     }
 
-    private var stateLabel: String {
-        if state.isWalking { return "移动中" }
-        switch state.targetAnimation {
-        case .workAtDesk: return "工作中"
-        case .idle:       return "空闲"
-        case .leave:      return "离线"
-        case .walk:       return "移动中"
-        default:          return "未知"
-        }
-    }
-
     private func countPill(status: TaskStatus, label: String) -> some View {
         let count = state.taskCounts[status] ?? 0
-        return Text("\(label) \(count)")
-            .font(.system(size: 9))
-            .foregroundColor(OfficePalette.textMuted)
-            .lineLimit(1)
+        return Group {
+            if count > 0 {
+                Text("\(label) \(count)")
+                    .font(.system(size: 9))
+                    .foregroundColor(OfficePalette.textMuted)
+                    .lineLimit(1)
+            }
+        }
+    }
+}
+
+// MARK: - Seeded Random
+
+private extension Double {
+    static func random(in range: ClosedRange<Double>, seed: String) -> Double {
+        var hasher = Hasher()
+        hasher.combine(seed)
+        let hash = abs(hasher.finalize())
+        let t = Double(hash % 1000) / 1000.0
+        return range.lowerBound + t * (range.upperBound - range.lowerBound)
     }
 }

@@ -223,6 +223,116 @@ struct TaskRun: Equatable, Identifiable, Codable {
     }
 }
 
+// MARK: - Task Event
+
+/// 任务事件（状态变更、指派等历史事件）。
+struct TaskEvent: Equatable, Identifiable, Codable {
+    let id: String
+    let taskId: String
+    let type: String
+    let actor: String
+    let note: String
+    let createdAt: Date
+
+    init(
+        id: String,
+        taskId: String,
+        type: String,
+        actor: String,
+        note: String,
+        createdAt: Date
+    ) {
+        self.id = id
+        self.taskId = taskId
+        self.type = type
+        self.actor = actor
+        self.note = note
+        self.createdAt = createdAt
+    }
+
+    static func fromJson(_ json: [String: Any], taskId: String) -> TaskEvent {
+        return TaskEvent(
+            id: (json["id"] as? String) ?? UUID().uuidString,
+            taskId: (json["task_id"] as? String) ?? (json["taskId"] as? String) ?? taskId,
+            type: (json["type"] as? String) ?? (json["event"] as? String) ?? "",
+            actor: (json["actor"] as? String) ?? (json["user"] as? String) ?? "system",
+            note: (json["note"] as? String) ?? (json["message"] as? String) ?? "",
+            createdAt: parseDate(json["createdAt"] ?? json["created_at"] ?? json["created"] ?? json["timestamp"])
+        )
+    }
+
+    private static func parseDate(_ value: Any?) -> Date {
+        guard let value = value else { return Date() }
+        if let d = value as? Date { return d }
+        if let i = value as? Int { return Date(timeIntervalSince1970: TimeInterval(i)) }
+        if let s = value as? String {
+            let iso = ISO8601DateFormatter()
+            iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let d = iso.date(from: s) { return d }
+            let iso2 = ISO8601DateFormatter()
+            if let d = iso2.date(from: s) { return d }
+            let f = DateFormatter()
+            f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+            f.locale = Locale(identifier: "en_US_POSIX")
+            if let d = f.date(from: s) { return d }
+        }
+        return Date()
+    }
+}
+
+// MARK: - Task Diagnostic Log
+
+/// 诊断日志/阻塞原因（从 `task.diagnostic` 或 `logs` 提取）。
+struct TaskDiagnosticLog: Equatable, Identifiable, Codable {
+    let id: String
+    let taskId: String
+    let reason: String
+    let detail: String
+    let createdAt: Date
+
+    init(
+        id: String,
+        taskId: String,
+        reason: String,
+        detail: String,
+        createdAt: Date
+    ) {
+        self.id = id
+        self.taskId = taskId
+        self.reason = reason
+        self.detail = detail
+        self.createdAt = createdAt
+    }
+
+    static func fromJson(_ json: [String: Any], taskId: String) -> TaskDiagnosticLog {
+        return TaskDiagnosticLog(
+            id: (json["id"] as? String) ?? UUID().uuidString,
+            taskId: (json["task_id"] as? String) ?? (json["taskId"] as? String) ?? taskId,
+            reason: (json["reason"] as? String) ?? (json["error"] as? String) ?? "",
+            detail: (json["detail"] as? String) ?? (json["message"] as? String) ?? "",
+            createdAt: parseDate(json["createdAt"] ?? json["created_at"] ?? json["created"] ?? json["timestamp"])
+        )
+    }
+
+    private static func parseDate(_ value: Any?) -> Date {
+        guard let value = value else { return Date() }
+        if let d = value as? Date { return d }
+        if let i = value as? Int { return Date(timeIntervalSince1970: TimeInterval(i)) }
+        if let s = value as? String {
+            let iso = ISO8601DateFormatter()
+            iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let d = iso.date(from: s) { return d }
+            let iso2 = ISO8601DateFormatter()
+            if let d = iso2.date(from: s) { return d }
+            let f = DateFormatter()
+            f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+            f.locale = Locale(identifier: "en_US_POSIX")
+            if let d = f.date(from: s) { return d }
+        }
+        return Date()
+    }
+}
+
 // MARK: - Task Item
 
 /// 任务卡片。
@@ -235,6 +345,7 @@ struct TaskItem: Equatable, Identifiable, Codable {
     var assignee: String
     var workspace: String
     var tenant: String
+    var creator: String
     var idempotencyKey: String
     var parentIds: [String]
     var comments: [TaskComment]
@@ -244,6 +355,10 @@ struct TaskItem: Equatable, Identifiable, Codable {
     var metadata: [String: String]
     /// 官方 `kanban runs <id>` 数据:每次 attempt 一行
     var runHistory: [TaskRun]
+    /// 事件流（状态变更、指派等）。
+    var events: [TaskEvent]
+    /// 诊断日志/阻塞原因。
+    var diagnosticLogs: [TaskDiagnosticLog]
     let createdAt: Date
     var updatedAt: Date
 
@@ -256,12 +371,15 @@ struct TaskItem: Equatable, Identifiable, Codable {
         assignee: String = "",
         workspace: String = "",
         tenant: String = "",
+        creator: String = "",
         idempotencyKey: String = "",
         parentIds: [String] = [],
         comments: [TaskComment] = [],
         summary: String = "",
         metadata: [String: String] = [:],
         runHistory: [TaskRun] = [],
+        events: [TaskEvent] = [],
+        diagnosticLogs: [TaskDiagnosticLog] = [],
         createdAt: Date,
         updatedAt: Date
     ) {
@@ -273,12 +391,15 @@ struct TaskItem: Equatable, Identifiable, Codable {
         self.assignee = assignee
         self.workspace = workspace
         self.tenant = tenant
+        self.creator = creator
         self.idempotencyKey = idempotencyKey
         self.parentIds = parentIds
         self.comments = comments
         self.summary = summary
         self.metadata = metadata
         self.runHistory = runHistory
+        self.events = events
+        self.diagnosticLogs = diagnosticLogs
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -293,6 +414,7 @@ struct TaskItem: Equatable, Identifiable, Codable {
         assignee: String = "",
         workspace: String = "",
         tenant: String = "",
+        creator: String = "",
         idempotencyKey: String = "",
         parentIds: [String] = []
     ) -> TaskItem {
@@ -306,6 +428,7 @@ struct TaskItem: Equatable, Identifiable, Codable {
             assignee: assignee,
             workspace: workspace,
             tenant: tenant,
+            creator: creator,
             idempotencyKey: idempotencyKey,
             parentIds: parentIds,
             createdAt: now,
@@ -325,9 +448,12 @@ struct TaskItem: Equatable, Identifiable, Codable {
             "assignee": assignee,
             "workspace": workspace,
             "tenant": tenant,
+            "creator": creator,
             "idempotencyKey": idempotencyKey,
             "parentIds": parentIds,
             "comments": comments.map { $0.toJson() },
+            "events": events.map { ["id": $0.id, "type": $0.type, "actor": $0.actor, "note": $0.note, "createdAt": iso.string(from: $0.createdAt)] },
+            "diagnosticLogs": diagnosticLogs.map { ["id": $0.id, "reason": $0.reason, "detail": $0.detail, "createdAt": iso.string(from: $0.createdAt)] },
             "createdAt": iso.string(from: createdAt),
             "updatedAt": iso.string(from: updatedAt),
         ]
@@ -378,8 +504,34 @@ struct TaskItem: Equatable, Identifiable, Codable {
             return []
         }()
 
+        // events:状态变更/指派历史
+        let taskId = (json["id"] as? String) ?? ""
+        let eventsList: [TaskEvent] = {
+            if let arr = json["events"] as? [[String: Any]] {
+                return arr.map { TaskEvent.fromJson($0, taskId: taskId) }
+            }
+            if let arr = json["history"] as? [[String: Any]] {
+                return arr.map { TaskEvent.fromJson($0, taskId: taskId) }
+            }
+            return []
+        }()
+
+        // diagnosticLogs:诊断/阻塞原因
+        let diagnosticLogsList: [TaskDiagnosticLog] = {
+            if let arr = json["diagnosticLogs"] as? [[String: Any]] {
+                return arr.map { TaskDiagnosticLog.fromJson($0, taskId: taskId) }
+            }
+            if let arr = json["diagnostics"] as? [[String: Any]] {
+                return arr.map { TaskDiagnosticLog.fromJson($0, taskId: taskId) }
+            }
+            if let dict = json["diagnostic"] as? [String: Any] {
+                return [TaskDiagnosticLog.fromJson(dict, taskId: taskId)]
+            }
+            return []
+        }()
+
         return TaskItem(
-            id: (json["id"] as? String) ?? "",
+            id: taskId,
             title: (json["title"] as? String) ?? "",
             body: (json["body"] as? String) ?? "",
             status: TaskStatus.parse(json["status"] as? String),
@@ -387,12 +539,15 @@ struct TaskItem: Equatable, Identifiable, Codable {
             assignee: (json["assignee"] as? String) ?? "",
             workspace: (json["workspace"] ?? json["workspace_kind"] ?? "") as? String ?? "",
             tenant: (json["tenant"] as? String) ?? "",
+            creator: (json["creator"] as? String) ?? (json["created_by"] as? String) ?? (json["author"] as? String) ?? "",
             idempotencyKey: (json["idempotencyKey"] ?? json["idempotency_key"] ?? "") as? String ?? "",
             parentIds: parentIdsList,
             comments: commentsList,
             summary: summaryStr,
             metadata: metadataMap,
             runHistory: runHistoryList,
+            events: eventsList,
+            diagnosticLogs: diagnosticLogsList,
             createdAt: parseDate(json["createdAt"] ?? json["created_at"] ?? json["created"]),
             updatedAt: parseDate(
                 json["updatedAt"]
@@ -449,12 +604,15 @@ struct TaskItem: Equatable, Identifiable, Codable {
         assignee: String? = nil,
         workspace: String? = nil,
         tenant: String? = nil,
+        creator: String? = nil,
         idempotencyKey: String? = nil,
         parentIds: [String]? = nil,
         comments: [TaskComment]? = nil,
         summary: String? = nil,
         metadata: [String: String]? = nil,
         runHistory: [TaskRun]? = nil,
+        events: [TaskEvent]? = nil,
+        diagnosticLogs: [TaskDiagnosticLog]? = nil,
         updatedAt: Date? = nil
     ) -> TaskItem {
         return TaskItem(
@@ -466,12 +624,15 @@ struct TaskItem: Equatable, Identifiable, Codable {
             assignee: assignee ?? self.assignee,
             workspace: workspace ?? self.workspace,
             tenant: tenant ?? self.tenant,
+            creator: creator ?? self.creator,
             idempotencyKey: idempotencyKey ?? self.idempotencyKey,
             parentIds: parentIds ?? self.parentIds,
             comments: comments ?? self.comments,
             summary: summary ?? self.summary,
             metadata: metadata ?? self.metadata,
             runHistory: runHistory ?? self.runHistory,
+            events: events ?? self.events,
+            diagnosticLogs: diagnosticLogs ?? self.diagnosticLogs,
             createdAt: createdAt,
             updatedAt: updatedAt ?? Date()
         )

@@ -10,6 +10,8 @@ struct AiChatPage: View {
     @State private var searchText = ""
     @State private var inputText = ""
     @State private var showFilePicker = false
+    /// 防止 onAppear 被反复触发时重复加载会话列表，避免视图重建循环。
+    @State private var hasLoadedSessions: Bool = false
 
     var isDark: Bool = true
 
@@ -39,14 +41,16 @@ struct AiChatPage: View {
         }
         .overlay(filePickerOverlay)
         .onAppear {
-            sessionVM.loadSessions()
-            // 从 ~/.hermes/config.yaml 读取当前默认模型，渲染到 header 徽标。
-            chatVM.loadCurrentModel()
-            // 从 ~/.hermes/config.yaml 读取当前工作区目录。
-            chatVM.loadWorkingDirectory()
-            // 兜底消费：用户可能先在工作区窗口添加了引用，再切到 AI 对话页。
-            // 用 async 避免 "Modifying state during view update" 警告。
-            DispatchQueue.main.async { self.consumePendingReference() }
+            NSLog("[AiChatPage] onAppear: 进入，hasLoadedSessions=\(hasLoadedSessions)")
+            // 初始配置填充已移到 AiChatViewModel.init 中直接完成，避免 onAppear 反复触发时
+            // 修改 @Published 状态导致视图重建循环。
+            // 这里只保留会话列表加载与 pending reference 消费，并用一次性标志防止重复。
+            if !hasLoadedSessions {
+                hasLoadedSessions = true
+                sessionVM.loadSessions()
+            }
+            consumePendingReference()
+            NSLog("[AiChatPage] onAppear: 退出")
         }
         .onChange(of: chatVM.model.inputText) { _, newValue in
             // 语音输入会修改 chatVM.model.inputText，同步到本地 @State 输入框。

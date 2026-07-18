@@ -56,6 +56,9 @@ struct TaskBoardPage: View {
             if let taskId = selectedTaskId,
                let task = viewModel.model.tasks.first(where: { $0.id == taskId }) {
                 TBTaskDetailPopup(task: task, viewModel: viewModel)
+                    .task {
+                        await viewModel.loadTaskDetail(taskId)
+                    }
             }
         }
         // ---- 键盘快捷键 ----

@@ -487,6 +487,46 @@ nonisolated final class TaskBoardService {
         return nil
     }
 
+    /// 拉取任务评论 — 对齐官方 `kanban comments <id>`。
+    /// 若 CLI 不存在，则尝试从 `kanban show <id>` 的 `comments` 字段兜底。
+    func getKanbanComments(taskId: String) async -> [String: Any]? {
+        let result = await runKanbanCli(
+            args: ["comments", taskId, "--json"],
+            timeout: queryTimeout
+        )
+        if let dict = result as? [String: Any] { return dict }
+        if let arr = result as? [Any] { return ["data": arr] }
+
+        // Fallback: 从 show 里提取 comments
+        if let show = await getKanbanShow(taskId: taskId),
+           let comments = show["comments"] as? [Any], !comments.isEmpty {
+            return ["data": comments]
+        }
+        return nil
+    }
+
+    /// 拉取任务历史事件 — 对齐官方 `kanban history <id>`。
+    /// 若 CLI 不存在，则尝试从 `kanban show <id>` 的 `history` / `events` 字段兜底。
+    func getKanbanHistory(taskId: String) async -> [String: Any]? {
+        let result = await runKanbanCli(
+            args: ["history", taskId, "--json"],
+            timeout: queryTimeout
+        )
+        if let dict = result as? [String: Any] { return dict }
+        if let arr = result as? [Any] { return ["data": arr] }
+
+        // Fallback: 从 show 里提取 history / events
+        if let show = await getKanbanShow(taskId: taskId) {
+            if let history = show["history"] as? [Any], !history.isEmpty {
+                return ["data": history]
+            }
+            if let events = show["events"] as? [Any], !events.isEmpty {
+                return ["data": events]
+            }
+        }
+        return nil
+    }
+
     /// 手动分解 Triage 任务为子任务 — 对齐官方 `kanban decompose <id>`。
     @discardableResult
     func decomposeTask(taskId: String) async -> Bool {

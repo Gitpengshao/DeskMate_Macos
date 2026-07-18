@@ -60,9 +60,30 @@ struct DeskMateNotchContent: View {
             .padding(.vertical, 12)
             .frame(minWidth: 240, minHeight: 80, alignment: .leading)
             .contentShape(Rectangle())
-        } else if manager.isConsoleOpen && notchSection == .expanded {
-            // 控制台打开期间悬浮展开：展示今日汇总
+        } else if manager.isConsoleOpen && notchSection == .expanded && HermesGatewayService.shared.isReady {
+            // 控制台打开期间悬浮展开：仅当 Gateway 已就绪时才展示今日汇总，
+            // 避免 Gateway 启动失败/未就绪时进入 TodaySummaryView 的 task 循环导致灵动岛卡死。
             TodaySummaryView(manager: manager)
+        } else if manager.isConsoleOpen && notchSection == .expanded && !HermesGatewayService.shared.isReady {
+            // Gateway 未就绪时保持显示简洁状态，提示用户服务未启动。
+            HStack(spacing: 10) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 14))
+                    .foregroundColor(.yellow)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("DeskMate")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.white)
+                    Text("Gateway 未启动")
+                        .font(.system(size: 10, weight: .regular))
+                        .foregroundColor(.white.opacity(0.65))
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+            .frame(minWidth: 240, minHeight: 56, alignment: .leading)
+            .contentShape(Rectangle())
         } else {
             Button(action: onOpenConsole) {
                 HStack(spacing: 12) {
@@ -157,9 +178,7 @@ private struct TodaySummaryView: View {
                     SummaryItem(title: "总计", value: formatCompact(stats.totalTokens))
                 }
             } else {
-                Text("正在加载今日数据…")
-                    .font(.system(size: 11, weight: .regular))
-                    .foregroundColor(.white.opacity(0.65))
+                summaryStatusText
             }
         }
         .padding(.horizontal, 18)
@@ -167,8 +186,25 @@ private struct TodaySummaryView: View {
         .frame(minWidth: 280, minHeight: 72, alignment: .leading)
         .contentShape(Rectangle())
         .task {
+            NSLog("[TodaySummaryView] .task: 触发 refreshTodayStats, isReady=\(HermesGatewayService.shared.isReady)")
             await manager.refreshTodayStats()
+            NSLog("[TodaySummaryView] .task: refreshTodayStats 返回, todayStats=\(String(describing: manager.todayStats)), isFetching=\(manager.isFetchingTodayStats)")
         }
+    }
+
+    /// 根据网关状态展示不同提示，避免网关未启动时仍显示"正在加载"。
+    private var summaryStatusText: some View {
+        let text: String
+        if !HermesGatewayService.shared.isReady {
+            text = "Gateway 未启动，暂无数据"
+        } else if manager.isFetchingTodayStats {
+            text = "正在加载今日数据…"
+        } else {
+            text = "暂无数据"
+        }
+        return Text(text)
+            .font(.system(size: 11, weight: .regular))
+            .foregroundColor(.white.opacity(0.65))
     }
 }
 
@@ -322,49 +358,76 @@ final class DynamicNotchManager: ObservableObject {
     private func handleClick() {
         // 立即进入加载状态，给用户即时反馈
         isLoading = true
-        // 触发回调，打开控制台（控制台就绪后会调用 consoleDidOpen）
-        onOpenConsole?()
+        // 延迟到下一 runloop 再触发打开控制台，避免在 loading 视图更新期间同步调用
+        // openMainConsole，从而减少 "Modifying state during view update" 与灵动岛动画冲突。
+        DispatchQueue.main.async { [weak self] in
+            self?.onOpenConsole?()
+        }
     }
 
-    /// 控制台已打开：清除加载状态并收起到 compact，保持灵动岛常驻。
-    /// 控制台打开期间仍允许鼠标悬浮展开，展开后展示今日汇总。
+    /// 控制台已打开：清除加载状态。
+    ///
+    /// 注意：Gateway 未就绪时不把 `isConsoleOpen` 设为 true，
+    /// 避免 DynamicNotchKit 在 expanded 状态下切换 content 视图时卡死。
+    /// 等 Gateway 启动成功后再调用一次本方法，才会真正展开显示今日汇总。
     func consoleDidOpen() {
+        NSLog("[DynamicNotchManager] consoleDidOpen: 进入，isReady=\(HermesGatewayService.shared.isReady)")
         isLoading = false
-        isConsoleOpen = true
-        Task { [weak self] in
-            // 收起到 compact，后续由用户悬浮触发展开并展示汇总
-            await self?.currentNotch?.compact()
+        if HermesGatewayService.shared.isReady {
+            isConsoleOpen = true
         }
+        NSLog("[DynamicNotchManager] consoleDidOpen: 完成，isConsoleOpen=\(isConsoleOpen)")
     }
 
     /// 控制台已关闭：恢复初始状态
     func consoleDidClose() {
+        NSLog("[DynamicNotchManager] consoleDidClose: 进入")
         isConsoleOpen = false
         todayStats = nil
+        NSLog("[DynamicNotchManager] consoleDidClose: 完成")
     }
 
     /// 后台刷新今日汇总数据，完成后更新 `todayStats`。
     ///
     /// - 使用 `Task.detached` 在后台线程执行拉取与聚合，避免阻塞主线程。
     /// - 带有并发保护，避免重复请求。
+    /// - 网关未就绪时直接返回，**不修改任何 @Published 属性**，
+    ///   避免触发 objectWillChange → TodaySummaryView 重建 → .task 再次调用 refreshTodayStats 的死循环。
     func refreshTodayStats() {
-        guard !isFetchingTodayStats else { return }
+        NSLog("[DynamicNotchManager] refreshTodayStats: 被调用，isFetchingTodayStats=\(isFetchingTodayStats), isReady=\(HermesGatewayService.shared.isReady)")
+
+        // 网关未就绪时直接返回，不修改任何状态。
+        // TodaySummaryView 已根据 HermesGatewayService.shared.isReady 显示"Gateway 未启动，暂无数据"。
+        guard HermesGatewayService.shared.isReady else {
+            NSLog("[DynamicNotchManager] refreshTodayStats: Gateway 未就绪，直接返回")
+            return
+        }
+
+        guard !isFetchingTodayStats else {
+            NSLog("[DynamicNotchManager] refreshTodayStats: 已有任务在执行，跳过")
+            return
+        }
 
         statsRefreshTask?.cancel()
         statsRefreshTask = Task { [weak self] in
             guard let self = self else { return }
 
             await MainActor.run { self.isFetchingTodayStats = true }
+            NSLog("[DynamicNotchManager] refreshTodayStats: 开始后台拉取")
 
             let stats = await Task.detached(priority: .utility) { [service = self.todayStatsService] in
                 await service.fetchTodayStats()
             }.value
 
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else {
+                NSLog("[DynamicNotchManager] refreshTodayStats: 任务已取消")
+                return
+            }
 
             await MainActor.run {
                 self.todayStats = stats
                 self.isFetchingTodayStats = false
+                NSLog("[DynamicNotchManager] refreshTodayStats: 拉取完成，chatCount=\(stats.chatCount), totalTokens=\(stats.totalTokens)")
             }
         }
     }

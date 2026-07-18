@@ -2,7 +2,14 @@ import Foundation
 
 // MARK: - Provider Constants (mirrors Flutter's hermes_service.dart constants)
 
-let kDefaultGithubMirror = "https://ghp.ci"
+/// Hermes 官方安装脚本地址。
+let kHermesOfficialInstallUrl = "https://hermes-agent.nousresearch.com/install.sh"
+/// Hermes 国内镜像安装脚本地址（推荐中国大陆用户使用）。
+let kHermesChinaInstallUrl = "https://res1.hermesagent.org.cn/install.sh"
+/// GitHub 国内代理，用于 git clone 加速（gitclone.com 为 insteadOf 前缀）。
+let kDefaultGithubMirror = "https://gitclone.com/"
+/// PyPI 国内镜像（清华大学 TUNA），用于 pip/uv 安装 Python 依赖加速。
+let kDefaultPipIndexUrl = "https://pypi.tuna.tsinghua.edu.cn/simple"
 let kSlowDownloadProgressThreshold: Double = 0.15
 let kSlowDownloadTimeoutSeconds: TimeInterval = 15
 
@@ -165,7 +172,10 @@ struct OnboardingModel {
     var isInstallFailed: Bool = false
     var installError: String?
     var isDownloadSlow: Bool = false
+    /// 慢速下载后提示用户切换到镜像的横幅。
     var showMirrorPrompt: Bool = false
+    /// 开始安装前询问使用国内镜像还是官方地址的 Alert。
+    var showInitialMirrorPrompt: Bool = false
     var isConfiguringMirror: Bool = false
     var mirrorUrl: String?
     var installStartTime: Date?
@@ -180,6 +190,19 @@ struct OnboardingModel {
         AiModelOption(id: "custom", name: "")
     ]
     var petPersonalityFile: String?
+
+    // SOUL.md 对话风格/身份标识
+    /// 当前 ~/.hermes/SOUL.md 的完整内容（空字符串表示文件不存在）。
+    var soulFileContent: String? = nil
+    /// 用户选择用于替换 SOUL.md 的本地 .md 文件 URL。
+    var soulFileURL: URL? = nil
+    /// 是否正在读取或替换 SOUL.md。
+    var isSoulFileLoading: Bool = false
+    /// SOUL.md 读取/替换失败的错误信息。
+    var soulFileError: String? = nil
+    /// 是否显示 SOUL.md 内容预览弹窗。
+    var showSoulPreview: Bool = false
+
     var modelProviderType: String = "builtin"
     var selectedBuiltInProvider: String?
     var builtInProviders: [BuiltInModelProvider] = []

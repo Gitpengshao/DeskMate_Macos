@@ -23,8 +23,12 @@ final class GatewayConnectionManager: ObservableObject {
     private init() {}
 
     /// 立即探测一次 `/health` 并更新状态。
+    /// 健康探测本身在后台线程执行，避免在 MainActor 上 await 网络超时，
+    /// 从而减少与 SwiftUI 视图更新周期冲突导致的 "Modifying state during view update"。
     func refresh() async {
-        let healthy = await HermesGatewayService.shared.isHealthy()
+        let healthy = await Task.detached(priority: .utility) {
+            await HermesGatewayService.shared.isHealthy()
+        }.value
         status = healthy ? .connected : .disconnected
     }
 

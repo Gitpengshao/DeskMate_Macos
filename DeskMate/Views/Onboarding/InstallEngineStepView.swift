@@ -185,8 +185,8 @@ struct InstallEngineStepView: View {
     // MARK: - Install Card
 
     private var installCard: some View {
-        let pct = Int(progress * 100)
-        let currentStage = min(max(Int(ceil(progress * 5)), 1), 5)
+        let pct = min(Int(progress * 100), 100)
+        let currentStage = min(max(Int(floor(progress * 5)) + 1, 1), 5)
 
         return VStack(spacing: 0) {
             // Title row

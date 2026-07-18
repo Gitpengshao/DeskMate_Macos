@@ -8,12 +8,12 @@ struct MainContentArea: View {
 
     @ObservedObject private var connection = GatewayConnectionManager.shared
 
-    // 缓存 AI 对话页的状态，切换侧边栏导航时不会销毁其 ViewModel，
-    // 从而保证 SSE 流等后台任务在 tab 切换后仍然继续进行。
     // 使用全局共享实例，以便语音快捷键等模块在控制台未打开时也能操作聊天状态。
-    @StateObject private var aiChatViewModel = AiChatViewModel.shared
+    // 共享单例不由视图拥有，使用 @ObservedObject 观察即可；@StateObject 包装已存在的
+    // 单例可能在视图更新期间触发 objectWillChange，导致 "Modifying state during view update"。
+    @ObservedObject private var aiChatViewModel = AiChatViewModel.shared
+    @ObservedObject private var settingsManager = SettingsManager.shared
     @StateObject private var sessionListViewModel = SessionListViewModel()
-    @StateObject private var settingsManager = SettingsManager.shared
 
     var body: some View {
         VStack(spacing: 0) {

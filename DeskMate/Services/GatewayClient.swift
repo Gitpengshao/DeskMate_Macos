@@ -206,6 +206,10 @@ final class GatewayClient {
 
     /// GET 一个 JSON 端点并解析为字典。
     private func getJson(_ path: String) async -> [String: Any]? {
+        guard HermesGatewayService.shared.isReady else {
+            DMLogger.log("GatewayClient: Gateway 未就绪，跳过 GET \(path)", name: "GatewayClient")
+            return nil
+        }
         guard let url = URL(string: baseUrl + path) else { return nil }
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
@@ -235,6 +239,10 @@ final class GatewayClient {
 
     /// 删除单个会话（`DELETE /api/sessions/{id}`）。
     func deleteSession(_ id: String) async -> Bool {
+        guard HermesGatewayService.shared.isReady else {
+            DMLogger.log("GatewayClient: Gateway 未就绪，跳过 DELETE /api/sessions/\(id)", name: "GatewayClient")
+            return false
+        }
         guard let url = URL(string: baseUrl + "/api/sessions/\(id)") else { return false }
         var req = URLRequest(url: url)
         req.httpMethod = "DELETE"
@@ -283,6 +291,11 @@ final class GatewayClient {
     ///   - request: 请求体（含 messages、model、stream、session_id）
     /// - Returns: SSE 流包装；若网络层失败则返回 status=0 的流。
     func chatCompletions(_ request: ChatCompletionRequest) async -> GatewaySseStream {
+        guard HermesGatewayService.shared.isReady else {
+            DMLogger.log("GatewayClient: Gateway 未就绪，跳过 chatCompletions", name: "GatewayClient")
+            let stream = AsyncStream<GatewayStreamEvent> { _ in }
+            return GatewaySseStream(events: stream, continuation: nil, statusCode: 0, sessionId: nil, task: nil)
+        }
         let url = URL(string: baseUrl + "/v1/chat/completions")!
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
@@ -399,6 +412,10 @@ final class GatewayClient {
     /// 当 SSE 流返回空内容时，用于回退诊断：Hermes 的非流响应通常会带上
     /// `error` 字段（如 provider 401 Invalid token），而 SSE 流只会空跑结束。
     func chatCompletionsNonStream(_ request: ChatCompletionRequest) async -> [String: Any]? {
+        guard HermesGatewayService.shared.isReady else {
+            DMLogger.log("GatewayClient: Gateway 未就绪，跳过 chatCompletionsNonStream", name: "GatewayClient")
+            return nil
+        }
         let url = URL(string: baseUrl + "/v1/chat/completions")!
         var req = URLRequest(url: url)
         req.httpMethod = "POST"

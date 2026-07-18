@@ -21,6 +21,8 @@ struct MainPage: View {
         }
         .frame(minWidth: 800, minHeight: 550)
         .preferredColorScheme(.dark)
+        // 环境与 Gateway 就绪检查已前移到 AppDelegate.openMainConsole，
+        // 避免在视图 onAppear 中关闭窗口/跳转页面触发 "Modifying state during view update"。
     }
 }
 

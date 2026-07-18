@@ -12,7 +12,9 @@ struct WelcomeGuideStepView: View {
     let onCustomModelUrlChanged: (String) -> Void
     let onCustomProviderNameChanged: (String) -> Void
     let onApiKeyChanged: (String) -> Void
-    let onPetPersonalityFileChanged: (String?) -> Void
+    let onSoulFileSelected: (URL) -> Void
+    let onClearSoulFile: () -> Void
+    let onViewSoulFile: () -> Void
 
     var body: some View {
         ScrollView {
@@ -42,17 +44,17 @@ struct WelcomeGuideStepView: View {
 
                 Spacer().frame(height: 24)
 
-                // Pet Personality Section
-                SectionCardView(title: "宠物性格") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("上传 .md 文件配置 AI 宠物的性格与对话风格")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        FileUploadRow(
-                            fileName: model.petPersonalityFile,
-                            onFileSelected: onPetPersonalityFileChanged
-                        )
-                    }
+                // SOUL.md Personality Section
+                SectionCardView(title: "对话风格 (SOUL.md)") {
+                    SoulFileSection(
+                        content: model.soulFileContent,
+                        selectedURL: model.soulFileURL,
+                        isLoading: model.isSoulFileLoading,
+                        error: model.soulFileError,
+                        onSelect: onSoulFileSelected,
+                        onClear: onClearSoulFile,
+                        onView: onViewSoulFile
+                    )
                 }
 
                 Spacer().frame(height: 16)
@@ -121,50 +123,95 @@ struct SectionCardView<Content: View>: View {
     }
 }
 
-// MARK: - File Upload Row
+// MARK: - SOUL.md File Section
 
-struct FileUploadRow: View {
-    let fileName: String?
-    let onFileSelected: (String?) -> Void
+struct SoulFileSection: View {
+    let content: String?
+    let selectedURL: URL?
+    let isLoading: Bool
+    let error: String?
+    let onSelect: (URL) -> Void
+    let onClear: () -> Void
+    let onView: () -> Void
+
+    private var statusText: String {
+        if isLoading { return "正在读取 SOUL.md..." }
+        if selectedURL != nil { return "已选择新文件，将替换 SOUL.md" }
+        if let content = content {
+            return content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "当前使用 Hermes 默认身份"
+                : "已自定义 SOUL.md"
+        }
+        return "尚未读取 SOUL.md"
+    }
 
     var body: some View {
-        HStack(spacing: 8) {
-            Text(fileName ?? "未选择文件")
-                .font(.caption)
-                .foregroundColor(fileName != nil ? .primary : .secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .frame(height: 32)
-                .padding(.horizontal, 12)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.primary.opacity(0.1), lineWidth: 1)
-                )
-
-            Button("上传文件") {
-                pickFile()
-            }
-            .buttonStyle(.bordered)
-
-            if fileName != nil {
-                Button {
-                    onFileSelected(nil)
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 12))
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Text(statusText)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Spacer()
+                if isLoading {
+                    ProgressView()
+                        .controlSize(.small)
                 }
-                .buttonStyle(.borderless)
             }
+
+            if let error = error {
+                Text(error)
+                    .font(.caption)
+                    .foregroundColor(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack(spacing: 8) {
+                Button("查看当前 SOUL.md") {
+                    onView()
+                }
+                .buttonStyle(.bordered)
+                .disabled(isLoading || content == nil)
+
+                Button(selectedURL != nil ? "更换 .md 文件" : "上传 .md 文件") {
+                    pickSoulFile()
+                }
+                .buttonStyle(.bordered)
+                .disabled(isLoading)
+
+                if selectedURL != nil {
+                    Button {
+                        onClear()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 12))
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+
+            if let url = selectedURL {
+                Text("已选择: \(url.lastPathComponent)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Text("SOUL.md 是 Hermes Agent 的主要身份标识，定义 AI 的对话风格与语气。")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    private func pickFile() {
+    private func pickSoulFile() {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.plainText, .text]
+        // 严格限制为 Markdown 文件（兼容旧版本 SDK）
+        let mdType = UTType(filenameExtension: "md", conformingTo: .plainText) ?? .plainText
+        panel.allowedContentTypes = [mdType]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.begin { response in
             if response == .OK, let url = panel.url {
-                onFileSelected(url.lastPathComponent)
+                onSelect(url)
             }
         }
     }

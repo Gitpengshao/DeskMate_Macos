@@ -165,20 +165,27 @@ final class HermesGatewayService {
     }
 
     /// 轮询 /health 直到就绪 — 对齐 Flutter `_waitForGatewayReady`。
+    /// 传入 `process` 可在进程已退出时立即停止等待，避免端口未释放时轮询满 30 秒。
     func waitForGatewayReady(port: Int = AppConstants.defaultGatewayPort,
+                             process: Process? = nil,
                              maxWait: TimeInterval = 30) async -> Bool {
         let deadline = Date().addingTimeInterval(maxWait)
         var attempt = 0
 
         while Date() < deadline {
             attempt += 1
-            try? await Task.sleep(nanoseconds: 2_000_000_000) // 2s
             NSLog("[HermesGateway] _waitForGatewayReady: 第 \(attempt) 次健康检查 (port=\(port))...")
             if await isHealthy(port: port) {
                 NSLog("[HermesGateway] _waitForGatewayReady: 第 \(attempt) 次健康检查成功")
                 return true
             }
-            NSLog("[HermesGateway] _waitForGatewayReady: 第 \(attempt) 次健康检查失败")
+            // 进程已退出，端口不可能再就绪，立即失败
+            if let process = process, !process.isRunning {
+                NSLog("[HermesGateway] _waitForGatewayReady: Gateway 进程已退出，停止等待")
+                return false
+            }
+            NSLog("[HermesGateway] _waitForGatewayReady: 第 \(attempt) 次健康检查失败，1s 后重试")
+            try? await Task.sleep(nanoseconds: 1_000_000_000) // 1s
         }
 
         attempt += 1
@@ -260,11 +267,12 @@ final class HermesGatewayService {
 
         // 构造启动参数
         // 注意：hermes gateway run 不支持 --port 参数，端口通过 API_SERVER_PORT 环境变量控制。
+        // 添加 --replace 以自动替换可能残留的同名 Gateway 实例，避免启动失败。
         var args = ["-m", "hermes_cli.main"]
         if let profile = profile, !profile.isEmpty, profile != "default" {
             args.append(contentsOf: ["--profile", profile])
         }
-        args.append(contentsOf: ["gateway", "run"])
+        args.append(contentsOf: ["gateway", "run", "--replace"])
         NSLog("[HermesGateway] startGatewayInternal: 启动参数=\(args)")
 
         // 构造子进程环境
@@ -307,7 +315,7 @@ final class HermesGatewayService {
 
         // 轮询健康检查
         NSLog("[HermesGateway] startGatewayInternal: 开始轮询健康检查...")
-        let healthy = await waitForGatewayReady(port: port)
+        let healthy = await waitForGatewayReady(port: port, process: process)
         NSLog("[HermesGateway] startGatewayInternal: 健康检查结果=\(healthy)")
 
         if healthy {

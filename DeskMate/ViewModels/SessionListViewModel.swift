@@ -6,7 +6,10 @@ import Combine
 @MainActor
 final class SessionListViewModel: ObservableObject {
 
-    @Published var state: SessionStateModel
+    /// 当前侧边栏状态（会话列表、加载/错误标记）。
+    /// 使用默认值并在声明处初始化，避免 `init` 赋值触发 `objectWillChange`，
+    /// 从而减少 `@StateObject` 创建时的 "Modifying state during view update" 警告。
+    @Published var state: SessionStateModel = SessionStateModel()
 
     private let apiService: SessionApiService
 
@@ -16,13 +19,13 @@ final class SessionListViewModel: ObservableObject {
         // 使用 GatewayClient.shared 以便 HermesGatewayService 启动后注入的 apiKey 生效。
         let resolvedGateway = gateway ?? GatewayClient.shared
         self.apiService = SessionApiService(client: resolvedGateway, profile: profile)
-        self.state = SessionStateModel()
     }
 
     /// 拉取全部会话 — 对齐 Flutter `loadSessions`。
     ///
     /// 侧边栏标题优先使用 `title`，否则使用后端返回的 `preview`（第一条用户消息）。
     func loadSessions() {
+        NSLog("[SessionListVM] loadSessions: 被调用，isLoading=\(state.isLoading)")
         guard !state.isLoading else { return }
         state.isLoading = true
         state.errorMessage = nil
@@ -41,7 +44,9 @@ final class SessionListViewModel: ObservableObject {
                 )
             }
 
-            await MainActor.run {
+            // 使用 @MainActor Task 异步提交状态更新，避免在视图更新周期中触发 objectWillChange。
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
                 DMLogger.log(
                     "SessionListVM: loaded \(sessions.count) sessions",
                     name: "SessionListVM"
@@ -64,8 +69,8 @@ final class SessionListViewModel: ObservableObject {
             _ = await self.apiService.deleteSessions([id])
             // 同步清理本地图片附件索引
             ImageAttachmentCache.shared.deleteAttachments(forSessionId: id)
-            await MainActor.run {
-                self.state.sessions.removeAll { $0.id == id }
+            Task { @MainActor [weak self] in
+                self?.state.sessions.removeAll { $0.id == id }
             }
         }
     }
