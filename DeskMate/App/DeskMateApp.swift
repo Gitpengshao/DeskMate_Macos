@@ -52,6 +52,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 桌宠 ViewModel，供语音快捷键等外部模块驱动动画。
     var petViewModel: PetViewModel? { viewModel }
 
+    /// 更新灵动岛对“控制台是否为当前 keyWindow”的认知。
+    /// 桌宠是 nonactivatingPanel，不会成为 keyWindow；当用户点击桌宠后，
+    /// keyWindow 会 resign，此时灵动岛应切回“进入控制台”。
+    @objc private func updateConsoleKeyState() {
+        let isKey = mainWindow?.isKeyWindow == true || onboardingWindow?.isKeyWindow == true
+        NSLog("[AppDelegate] updateConsoleKeyState: mainWindow.isKeyWindow=\(mainWindow?.isKeyWindow ?? false), onboardingWindow.isKeyWindow=\(onboardingWindow?.isKeyWindow ?? false), isConsoleKeyWindow=\(isKey)")
+        notchManager.isConsoleKeyWindow = isKey
+    }
+
+    /// 应用变为 active 后，确保已显示的控制台窗口成为 keyWindow，
+    /// 否则从 accessory 切到 regular 时 makeKeyAndOrderFront 不会立即生效。
+    @objc private func handleAppDidBecomeActive() {
+        NSLog("[AppDelegate] handleAppDidBecomeActive")
+        if let window = mainWindow, window.isVisible, !window.isKeyWindow, window.canBecomeKey {
+            window.makeKeyAndOrderFront(nil)
+        }
+        if let window = onboardingWindow, window.isVisible, !window.isKeyWindow, window.canBecomeKey {
+            window.makeKeyAndOrderFront(nil)
+        }
+        updateConsoleKeyState()
+    }
+
     func applicationWillFinishLaunching(_ notification: Notification) {
         // 单实例锁：若已有其他 DeskMate 实例在运行，激活它并终止当前进程。
         let bundleID = Bundle.main.bundleIdentifier ?? "com.deskmate.DeskMate"
@@ -94,7 +116,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.openConsole()
             }
 
-            // 4. 启动时显示灵动岛
+            // 6. 监听控制台窗口 key 状态变化，驱动灵动岛悬浮内容在“进入控制台”与“Token 统计”之间切换。
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(self.updateConsoleKeyState),
+                name: NSWindow.didBecomeKeyNotification,
+                object: nil
+            )
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(self.updateConsoleKeyState),
+                name: NSWindow.didResignKeyNotification,
+                object: nil
+            )
+            // 应用从 accessory 切到 regular 后 activate 是异步的，窗口在 didBecomeActive 后才可能成为 keyWindow。
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(self.handleAppDidBecomeActive),
+                name: NSApplication.didBecomeActiveNotification,
+                object: nil
+            )
+            self.updateConsoleKeyState()
+
+            // 7. 启动时显示灵动岛
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
                 self?.notchManager.show()
             }
@@ -113,6 +157,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             // 不预加载主窗口，避免 MainPage body 在 Gateway 未就绪时提前求值，
                             // 触发 @StateObject init 与 objectWillChange 导致状态更新冲突。
                             Task.detached(priority: .userInitiated) { [weak self] in
+                                // 先停止所有已注册及残留的 Gateway 进程，确保端口释放后再启动，
+                                // 避免 --replace 替换旧实例时因端口未释放而启动失败。
+                                await HermesGatewayService.shared.stopAllGateways()
                                 await self?.startHermesGatewayIfNeeded()
                             }
                         } else {
@@ -349,6 +396,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// 启动 Gateway 并等待其就绪；返回是否成功。幂等。
     private func startAndWaitForHermesGateway() async -> Bool {
+        // 若 Gateway 已在运行且健康，直接复用，避免 Onboarding 完成后再无意义重启
+        // 导致旧实例端口未释放、新实例因 address already in use 启动失败。
+        if await HermesGatewayService.shared.isHealthy() {
+            NSLog("[AppDelegate] startAndWaitForHermesGateway: Gateway 已在运行且健康，直接复用")
+            gatewayStarted = true
+            await MainActor.run {
+                // Gateway 就绪后再启动周期性健康探测，避免未就绪时反复刷新触发视图循环。
+                self.startGatewayMonitoring()
+                // Gateway 就绪后再通知灵动岛切换到今日汇总视图，避免未就绪时切换 content 卡死。
+                self.notchManager.consoleDidOpen()
+            }
+            return true
+        }
+
         guard !gatewayStarted else {
             let ready = HermesGatewayService.shared.isReady
             NSLog("[AppDelegate] startAndWaitForHermesGateway: gatewayStarted=true, isReady=\(ready)")

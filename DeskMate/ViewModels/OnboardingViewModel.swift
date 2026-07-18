@@ -9,8 +9,8 @@ class OnboardingViewModel: ObservableObject {
 
     @Published var model: OnboardingModel
 
-    /// 环境检测完成后发现 Hermes 已安装且大模型已配置（config.yaml 中有 API Key），
-    /// 则直接跳过所有 onboarding 步骤进入主页面。
+    /// 历史遗留：环境检测完成后发现 Hermes 已安装且大模型已配置时用于触发 onComplete。
+    /// 现在统一通过 `model.isCompleted` 触发完成回调，保留该属性以避免破坏外部引用。
     @Published var didCompleteEarly: Bool = false
 
     // MARK: - Timers (对齐 Flutter 的 _downloadTimer / _slowDownloadTimer)
@@ -26,6 +26,9 @@ class OnboardingViewModel: ObservableObject {
     private let installProcessLock = NSLock()
     private var isInstallCancelled: Bool = false
     private let isInstallCancelledLock = NSLock()
+    /// 防止 completeOnboarding 被重复调用导致 Gateway 多次启动。
+    private var isCompletingOnboarding: Bool = false
+    private let isCompletingOnboardingLock = NSLock()
     /// 单调递增的 milestone 进度，仅当关键字命中更高档位时才前进。
     private var installMilestone: Double = 0.0
     /// 当前 milestone 达到的时间，用于在 milestone 之间做平滑进度动画。
@@ -189,10 +192,8 @@ class OnboardingViewModel: ObservableObject {
             if isFullyConfigured {
                 DMLogger.log("Hermes 已安装、已配置、API Key 已配置，跳过所有步骤，直接进入主页面", name: "OnboardingViewModel")
                 self.completeOnboarding()
-                // 延迟触发 early complete，让 UI 有时间渲染
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                    self?.didCompleteEarly = true
-                }
+                // 成功完成 onboarding 后，completeOnboarding 内部会设置 isCompleted；
+                // 这里通过观察 didCompleteEarly 触发 onComplete 的调用已改为观察 isCompleted。
             } else if pythonPassed && hermesPassed {
                 // 如果 Python 和 Hermes 都已安装但配置或 API Key 未配置，跳过第二步安装，直接进入第三步配置
                 DMLogger.log("Python 和 Hermes 均已安装，但配置或 API Key 未配置，跳过第二步，直接进入第三步配置", name: "OnboardingViewModel")
@@ -1514,10 +1515,26 @@ class OnboardingViewModel: ObservableObject {
     func completeOnboarding() {
         DMLogger.log("completeOnboarding called", name: "OnboardingViewModel")
 
+        // 防止重复调用：环境检测自动跳过和用户点击“下一步”可能并发触发。
+        isCompletingOnboardingLock.lock()
+        if isCompletingOnboarding {
+            isCompletingOnboardingLock.unlock()
+            DMLogger.log("completeOnboarding: 已在执行中，忽略重复调用", name: "OnboardingViewModel")
+            return
+        }
+        isCompletingOnboarding = true
+        isCompletingOnboardingLock.unlock()
+
         model.isSaving = true
+        model.onboardingError = nil
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
+            defer {
+                self.isCompletingOnboardingLock.lock()
+                self.isCompletingOnboarding = false
+                self.isCompletingOnboardingLock.unlock()
+            }
 
             // 1. 保存桌面配置（desktop.json）
             self.saveDesktopConfig()
@@ -1580,12 +1597,22 @@ class OnboardingViewModel: ObservableObject {
             // 同步等待以确保 onboarding 完成时 gateway 已经用上新配置
             let gateway = HermesGatewayService.shared
             let semaphore = DispatchSemaphore(value: 0)
+            var gatewayStarted = false
             Task {
                 await gateway.stopGateway()
-                _ = await gateway.startGateway()
+                gatewayStarted = await gateway.startGateway()
                 semaphore.signal()
             }
             semaphore.wait()
+
+            guard gatewayStarted else {
+                DMLogger.error("completeOnboarding: Gateway 启动失败", name: "OnboardingViewModel")
+                DispatchQueue.main.async {
+                    self.model.onboardingError = "Gateway 启动失败，请检查 Hermes 环境或端口 8642 是否被占用。"
+                    self.model.isSaving = false
+                }
+                return
+            }
             DMLogger.log("completeOnboarding: Gateway 已重启", name: "OnboardingViewModel")
 
             // 6. 标记 onboarding_completed

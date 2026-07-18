@@ -48,12 +48,12 @@ final class ModelConfigService {
         (hermesHome as NSString).appendingPathComponent("config.yaml")
     }
 
-    /// 同步读取当前默认模型信息。
+    /// 异步读取当前默认模型信息。
     /// - Returns: 解析成功时返回 `CurrentModelInfo`；缺失/解析失败时返回 `nil`。
-    func readCurrentModel() -> CurrentModelInfo? {
+    func readCurrentModel() async -> CurrentModelInfo? {
         // 沙盒环境下 FileManager 可能无法直接访问 ~/.hermes/，
         // 因此与 OnboardingViewModel.checkConfigYamlForModel 一致，通过 shell 读取。
-        let raw = runShell("cat '\(configPath)' 2>/dev/null")
+        let raw = await runShell("cat '\(configPath)' 2>/dev/null")
         guard !raw.isEmpty else {
             DMLogger.log(
                 "readCurrentModel: config.yaml 为空或不可读, path=\(configPath)",
@@ -168,26 +168,78 @@ final class ModelConfigService {
 
     // MARK: - Shell
 
-    /// 通过 /bin/bash 执行命令并返回 stdout。
-    /// 沙盒环境下用于访问真实 ~/.hermes/。
-    private func runShell(_ command: String) -> String {
+    /// 通过 /bin/bash 异步执行命令并返回 stdout。
+    /// 使用 FileHandle.readabilityHandler 异步读取输出，并设置 5 秒超时强制终止进程，
+    /// 避免同步 waitUntilExit 阻塞调用线程（尤其是主线程）。
+    private func runShell(_ command: String) async -> String {
         let task = Process()
         task.launchPath = "/bin/bash"
         task.arguments = ["-c", command]
         let pipe = Pipe()
         task.standardOutput = pipe
         task.standardError = FileHandle.nullDevice
-        do {
-            try task.run()
-        } catch {
-            DMLogger.error(
-                "runShell 启动失败: \(error.localizedDescription), cmd=\(command)",
-                name: "ModelConfigService"
-            )
-            return ""
+
+        return await withCheckedContinuation { continuation in
+            var output = ""
+            let outputLock = NSLock()
+            var resumed = false
+            let resumeLock = NSLock()
+
+            func resumeOnce(_ value: String) {
+                resumeLock.lock()
+                defer { resumeLock.unlock() }
+                guard !resumed else { return }
+                resumed = true
+                continuation.resume(returning: value)
+            }
+
+            func appendOutput(_ chunk: String) {
+                outputLock.lock()
+                defer { outputLock.unlock() }
+                output.append(chunk)
+            }
+
+            pipe.fileHandleForReading.readabilityHandler = { handle in
+                let data = handle.availableData
+                if data.isEmpty {
+                    handle.readabilityHandler = nil
+                    return
+                }
+                if let chunk = String(data: data, encoding: .utf8) {
+                    appendOutput(chunk)
+                }
+            }
+
+            task.terminationHandler = { _ in
+                pipe.fileHandleForReading.readabilityHandler = nil
+                let remaining = pipe.fileHandleForReading.readDataToEndOfFile()
+                if let chunk = String(data: remaining, encoding: .utf8) {
+                    appendOutput(chunk)
+                }
+                resumeOnce(output)
+            }
+
+            do {
+                try task.run()
+            } catch {
+                pipe.fileHandleForReading.readabilityHandler = nil
+                DMLogger.error(
+                    "runShell 启动失败: \(error.localizedDescription), cmd=\(command)",
+                    name: "ModelConfigService"
+                )
+                resumeOnce("")
+                return
+            }
+
+            // 5 秒超时：先尝试优雅终止，再等 1 秒确保 terminationHandler 被调用
+            DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
+                if task.isRunning {
+                    task.terminate()
+                }
+                DispatchQueue.global().asyncAfter(deadline: .now() + 1) {
+                    resumeOnce(output)
+                }
+            }
         }
-        task.waitUntilExit()
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        return String(data: data, encoding: .utf8) ?? ""
     }
 }

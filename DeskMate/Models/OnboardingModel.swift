@@ -215,6 +215,8 @@ struct OnboardingModel {
     // Completion
     var isCompleted: Bool = false
     var isSaving: Bool = false
+    /// 完成 onboarding 过程中出现的错误（如 Gateway 启动失败）。
+    var onboardingError: String? = nil
 
     // MARK: Computed Properties
 

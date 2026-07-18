@@ -199,7 +199,7 @@ struct InstallEngineStepView: View {
 
             Spacer().frame(height: 40)
 
-            // Egg icon in circle
+            // Pet sprite animation in circle
             ZStack {
                 Circle()
                     .fill(Color.primary.opacity(0.05))
@@ -212,9 +212,10 @@ struct InstallEngineStepView: View {
                 if isConfiguringMirror {
                     ProgressView()
                         .scaleEffect(1.2)
+                } else if progress >= 1.0 {
+                    SpriteFrameAnimationView(config: SpriteSheets.downloadComplete, fps: 24, displaySize: 80)
                 } else {
-                    Text(progress >= 1.0 ? "🐣" : "🥚")
-                        .font(.largeTitle)
+                    SpriteFrameAnimationView(config: SpriteSheets.downloading, fps: 24, displaySize: 80)
                 }
             }
 

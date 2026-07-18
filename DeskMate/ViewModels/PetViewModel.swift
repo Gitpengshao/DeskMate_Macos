@@ -6,6 +6,13 @@ final class PetViewModel: ObservableObject {
     @Published var isDragging = false
     @Published var currentFrame: NSImage?
     @Published var petSize: CGSize
+    /// 聆听提示气泡是否可见（语音快捷键长按期间）。
+    @Published var isListeningBubbleVisible = false
+    /// 当前语音识别到的文本；为空时气泡显示默认提示语。
+    @Published var listeningTranscript = ""
+
+    /// 聆听气泡占用的高度（包含小三角）。
+    let listeningBubbleHeight: CGFloat = 64
 
     weak var window: NSWindow?
 
@@ -115,20 +122,29 @@ final class PetViewModel: ObservableObject {
         applyDefaultAnimation()
     }
 
-    /// 切换到 listen 动画，用于语音聆听快捷键反馈。
+    /// 切换到 listen 动画并显示聆听气泡，用于语音聆听快捷键反馈。
     func startListeningAnimation() {
         guard !behaviorManager.isDragging else { return }
         if behaviorManager.isSleeping {
             behaviorManager.wakeUp()
         }
+        isListeningBubbleVisible = true
+        listeningTranscript = ""
         behaviorManager.startListening()
         animationManager.switchToListen()
         currentFrame = animationManager.currentFrame
     }
 
-    /// 结束 listen 动画，恢复到当前默认动画。
+    /// 更新气泡中显示的识别文本。
+    func updateListeningTranscript(_ text: String) {
+        listeningTranscript = text
+    }
+
+    /// 结束 listen 动画并隐藏聆听气泡，恢复到当前默认动画。
     func stopListeningAnimation() {
         behaviorManager.stopListening()
+        isListeningBubbleVisible = false
+        listeningTranscript = ""
         guard !behaviorManager.isDragging else {
             currentFrame = animationManager.currentFrame
             return
@@ -146,18 +162,42 @@ final class PetViewModel: ObservableObject {
                 let newSize = SettingsManager.shared.petSize
                 guard self.petSize != newSize else { return }
                 self.petSize = newSize
-                self.resizeWindow(to: newSize)
+                self.resizeWindow(anchor: .center)
+            }
+            .store(in: &cancellables)
+
+        $isListeningBubbleVisible
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.resizeWindow(anchor: .bottom)
             }
             .store(in: &cancellables)
     }
 
-    private func resizeWindow(to size: CGSize) {
+    private enum WindowResizeAnchor {
+        case center
+        case bottom
+    }
+
+    private func resizeWindow(anchor: WindowResizeAnchor) {
         guard let window = window else { return }
+        let bubbleHeight = isListeningBubbleVisible ? listeningBubbleHeight : 0
+        let contentSize = CGSize(width: petSize.width, height: petSize.height + bubbleHeight)
+
         var frame = window.frame
-        let oldCenter = CGPoint(x: frame.midX, y: frame.midY)
-        frame.size = size
-        frame.origin.x = oldCenter.x - size.width / 2
-        frame.origin.y = oldCenter.y - size.height / 2
+        frame.size = contentSize
+
+        switch anchor {
+        case .center:
+            let oldCenter = CGPoint(x: window.frame.midX, y: window.frame.midY)
+            frame.origin.x = oldCenter.x - contentSize.width / 2
+            frame.origin.y = oldCenter.y - contentSize.height / 2
+        case .bottom:
+            // 保持窗口底部位置不变，气泡向上展开
+            frame.origin.x = window.frame.origin.x + (window.frame.width - contentSize.width) / 2
+            frame.origin.y = window.frame.minY
+        }
+
         window.setFrame(frame, display: true, animate: false)
     }
 }

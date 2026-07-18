@@ -44,6 +44,15 @@ struct OnboardingView: View {
                 .padding(.horizontal, 24)
             }
 
+            // Show error if onboarding completion failed (e.g. Gateway could not start)
+            if let error = viewModel.model.onboardingError {
+                Text(error)
+                    .font(.callout)
+                    .foregroundColor(.red)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+            }
+
             // Bottom actions
             BottomActionsView(
                 isFirstStep: viewModel.model.currentStep == 0,
@@ -58,7 +67,7 @@ struct OnboardingView: View {
         }
         .frame(width: 558, height: 560)
         .background(Color(NSColor.windowBackgroundColor))
-        .onChange(of: viewModel.didCompleteEarly) { _, newValue in
+        .onChange(of: viewModel.model.isCompleted) { _, newValue in
             if newValue {
                 onComplete()
             }
@@ -167,15 +176,18 @@ struct OnboardingView: View {
     private func handleNext() {
         let state = viewModel.model
 
+        // 如果 onboarding 正在保存/完成中，避免重复触发（尤其是自动跳过和用户点击并发时）。
+        if state.isSaving || state.isCompleted {
+            return
+        }
+
         if state.currentStep == state.totalSteps - 1 {
             // Completing onboarding
             viewModel.completeOnboarding()
-            onComplete()
         } else if state.currentStep == 0 {
             if state.hermesInstalled && state.isEnvironmentReady && state.hermesHasModelConfigured && state.hermesHasApiKey {
                 // 全部配置完成（含API Key）→ 直接进入首页
                 viewModel.completeOnboarding()
-                onComplete()
             } else if state.hermesInstalled && state.isEnvironmentReady {
                 // Hermes已安装但大模型未配置 → 跳过安装步骤，直接到欢迎引导
                 viewModel.goToStep(2)

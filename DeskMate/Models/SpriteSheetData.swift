@@ -21,6 +21,8 @@ enum PetAnimation {
     case workAtDesk
     case listen
     case sick
+    case downloadComplete
+    case downloading
 
     var config: SpriteSheetConfig {
         switch self {
@@ -35,6 +37,8 @@ enum PetAnimation {
         case .workAtDesk: return SpriteSheets.workAtDesk
         case .listen: return SpriteSheets.listen
         case .sick:   return SpriteSheets.sick
+        case .downloadComplete: return SpriteSheets.downloadComplete
+        case .downloading:      return SpriteSheets.downloading
         }
     }
 }
@@ -124,6 +128,22 @@ enum SpriteSheets {
         imageName: "sick",
         columns: 6,
         totalFrames: 37,
+        frameSize: 180,
+        sourceFrameSize: nil
+    )
+
+    static let downloadComplete = SpriteSheetConfig(
+        imageName: "downloadComplete",
+        columns: 6,
+        totalFrames: 40,
+        frameSize: 180,
+        sourceFrameSize: nil
+    )
+
+    static let downloading = SpriteSheetConfig(
+        imageName: "downloading",
+        columns: 6,
+        totalFrames: 30,
         frameSize: 180,
         sourceFrameSize: nil
     )

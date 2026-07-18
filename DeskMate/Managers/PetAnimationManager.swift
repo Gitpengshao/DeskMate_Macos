@@ -59,6 +59,9 @@ final class PetAnimationManager {
         case .workAtDesk: frames = workAtDeskFrames
         case .listen: frames = listenFrames
         case .sick:   frames = sickFrames
+        case .downloadComplete, .downloading:
+            // Onboarding-specific animations are not driven by PetAnimationManager.
+            frames = []
         }
         guard !frames.isEmpty else { return }
         currentFrameIndex = (currentFrameIndex + 1) % frames.count

@@ -60,11 +60,11 @@ struct DeskMateNotchContent: View {
             .padding(.vertical, 12)
             .frame(minWidth: 240, minHeight: 80, alignment: .leading)
             .contentShape(Rectangle())
-        } else if manager.isConsoleOpen && notchSection == .expanded && HermesGatewayService.shared.isReady {
-            // 控制台打开期间悬浮展开：仅当 Gateway 已就绪时才展示今日汇总，
+        } else if manager.isConsoleKeyWindow && notchSection == .expanded && HermesGatewayService.shared.isReady {
+            // 控制台为 keyWindow 时悬浮展开：仅当 Gateway 已就绪时才展示今日 Token 统计，
             // 避免 Gateway 启动失败/未就绪时进入 TodaySummaryView 的 task 循环导致灵动岛卡死。
             TodaySummaryView(manager: manager)
-        } else if manager.isConsoleOpen && notchSection == .expanded && !HermesGatewayService.shared.isReady {
+        } else if manager.isConsoleKeyWindow && notchSection == .expanded && !HermesGatewayService.shared.isReady {
             // Gateway 未就绪时保持显示简洁状态，提示用户服务未启动。
             HStack(spacing: 10) {
                 Image(systemName: "exclamationmark.triangle.fill")
@@ -99,7 +99,7 @@ struct DeskMateNotchContent: View {
                         Text("DeskMate")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundColor(.white)
-                        Text("点击打开控制台")
+                        Text("进入控制台")
                             .font(.system(size: 10, weight: .regular))
                             .foregroundColor(.white.opacity(0.65))
                     }
@@ -157,7 +157,7 @@ private struct TodaySummaryView: View {
                 Image(systemName: "chart.bar.fill")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.white.opacity(0.9))
-                Text("今日汇总")
+                Text("今日 Token 统计")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.white)
 
@@ -258,7 +258,7 @@ private struct NotchButtonStyle: ButtonStyle {
 ///    避免点击后无响应的卡顿感。
 /// 3. 工作态 — AI 流式输出期间灵动岛展开并播放 work 精灵动画，
 ///    流结束后收回到 compact 状态。
-/// 4. 控制台打开期间 — 鼠标悬浮展开时展示今日汇总，数据在后台刷新。
+/// 4. 控制台打开期间 — 鼠标悬浮展开时展示今日 Token 统计，数据在后台刷新。
 @MainActor
 final class DynamicNotchManager: ObservableObject {
     /// 全局单例 — 业务侧（AiChatViewModel 等）可直接访问，无需经过 AppDelegate。
@@ -270,8 +270,13 @@ final class DynamicNotchManager: ObservableObject {
     /// 是否处于 AI 工作态 — 流式输出期间为 true，驱动灵动岛展开 work 动画
     @Published var isWorking: Bool = false
 
-    /// 控制台窗口当前是否处于打开状态
+    /// 控制台窗口当前是否处于打开状态（窗口引用存在）
     @Published var isConsoleOpen: Bool = false
+
+    /// 控制台窗口当前是否为 keyWindow — 用于灵动岛内容判断。
+    /// 桌宠窗口是 nonactivatingPanel，不会成为 keyWindow；
+    /// 因此当用户把注意力切回桌宠时 isConsoleKeyWindow 为 false，灵动岛应展示“进入控制台”。
+    @Published var isConsoleKeyWindow: Bool = false
 
     /// 今日汇总数据
     @Published var todayStats: TodayStats?

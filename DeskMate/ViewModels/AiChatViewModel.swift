@@ -102,10 +102,8 @@ import Combine
         // model.currentModel，避免在视图更新周期中触发 objectWillChange。
         Task { [weak self] in
             guard let self = self else { return }
-            let info = await Task.detached(priority: .userInitiated) {
-                self.modelConfigService.readCurrentModel()
-            }.value
-            Task { @MainActor [weak self] in
+            let info = await self.modelConfigService.readCurrentModel()
+            await MainActor.run { [weak self] in
                 guard let self = self else { return }
                 self.model.currentModel = info
                 DMLogger.log(
@@ -904,9 +902,7 @@ import Combine
     func loadCurrentModel() {
         Task { [weak self] in
             guard let self = self else { return }
-            let info = await Task.detached(priority: .userInitiated) {
-                self.modelConfigService.readCurrentModel()
-            }.value
+            let info = await self.modelConfigService.readCurrentModel()
 
             await MainActor.run {
                 self.model.currentModel = info

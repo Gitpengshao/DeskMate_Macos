@@ -80,11 +80,12 @@ final class HermesGatewayService {
         return await startGatewayInternal(profile: profile, preferredPort: existingPort)
     }
 
-    /// 停止所有已注册的 Gateway 进程。
+    /// 停止所有已注册的 Gateway 进程，并清理系统中残留的 Hermes Gateway 进程。
     func stopAllGateways() async {
         let instances = await Array(registry.instances.values)
         await MainActor.run { [weak self] in
             self?.currentProfile = nil
+            self?.isReady = false
         }
 
         for instance in instances {
@@ -95,6 +96,10 @@ final class HermesGatewayService {
             await stopProcess(instance.process, port: instance.port)
         }
         await registry.instances.removeAll()
+
+        // 清理应用崩溃或上次未正常退出时残留的 Hermes Gateway 进程，避免端口被占用。
+        await killOrphanedGatewayProcesses()
+        await waitForPortRelease(port: AppConstants.defaultGatewayPort, maxWait: 3)
     }
 
     /// 指定 profile 的 Gateway 是否处于就绪状态。
@@ -234,6 +239,8 @@ final class HermesGatewayService {
             )
             await stopProcess(existing.process, port: existing.port)
             await registry.instances.removeValue(forKey: key)
+            // 停止进程后等待端口真正释放，避免新进程因 address already in use 启动失败。
+            await waitForPortRelease(port: existing.port, maxWait: 3)
         }
 
         // 读取 profile 目录下的 .env
@@ -374,6 +381,89 @@ final class HermesGatewayService {
             }
             try? await Task.sleep(nanoseconds: 500_000_000)
         }
+    }
+
+    /// 清理系统中非当前应用实例启动的残留 Hermes Gateway 进程。
+    /// 通过命令行匹配与端口监听两种方式查找，避免残留进程继续占用端口。
+    private func killOrphanedGatewayProcesses() async {
+        var pids = Set<Int32>()
+
+        // 1. 匹配命令行中包含 hermes_cli.main gateway 的进程（排除 grep 自身）。
+        let cmdOutput = runShellSync(
+            "ps -eo pid,args | grep -E '[h]ermes_cli.main.*gateway' | awk '{print $1}' || true"
+        )
+        for line in cmdOutput.split(separator: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if let pid = Int32(trimmed), pid > 0 {
+                pids.insert(pid)
+            }
+        }
+
+        // 2. 查找监听默认 Gateway 端口的进程。
+        let portOutput = runShellSync(
+            "lsof -iTCP:\(AppConstants.defaultGatewayPort) -sTCP:LISTEN -P -n | tail -n +2 | awk '{print $2}' || true"
+        )
+        for line in portOutput.split(separator: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if let pid = Int32(trimmed), pid > 0 {
+                pids.insert(pid)
+            }
+        }
+
+        guard !pids.isEmpty else { return }
+
+        DMLogger.log(
+            "killOrphanedGatewayProcesses: 发现 \(pids.count) 个残留 Gateway 进程: \(pids.sorted())",
+            name: "HermesGateway"
+        )
+
+        // 发送 SIGTERM。
+        for pid in pids {
+            DMLogger.log("killOrphanedGatewayProcesses: 发送 SIGTERM 到 pid=\(pid)", name: "HermesGateway")
+            kill(pid, SIGTERM)
+        }
+
+        let termDeadline = Date().addingTimeInterval(5)
+        while Date() < termDeadline {
+            let remaining = pids.filter { kill($0, 0) == 0 }
+            if remaining.isEmpty { break }
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
+
+        // 超时未退出的强制 SIGKILL。
+        for pid in pids {
+            if kill(pid, 0) == 0 {
+                DMLogger.log("killOrphanedGatewayProcesses: pid=\(pid) 未退出，发送 SIGKILL", name: "HermesGateway")
+                kill(pid, SIGKILL)
+            }
+        }
+
+        let killDeadline = Date().addingTimeInterval(2)
+        while Date() < killDeadline {
+            let remaining = pids.filter { kill($0, 0) == 0 }
+            if remaining.isEmpty { break }
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
+
+        let remaining = pids.filter { kill($0, 0) == 0 }
+        if !remaining.isEmpty {
+            DMLogger.log("killOrphanedGatewayProcesses: 以下进程未能终止: \(remaining.sorted())", name: "HermesGateway")
+        } else {
+            DMLogger.log("killOrphanedGatewayProcesses: 所有残留进程已终止", name: "HermesGateway")
+        }
+    }
+
+    /// 等待指定端口释放。
+    private func waitForPortRelease(port: Int, maxWait: TimeInterval) async {
+        let deadline = Date().addingTimeInterval(maxWait)
+        while Date() < deadline {
+            if !isPortInUse(port: port) {
+                DMLogger.log("waitForPortRelease: 端口 \(port) 已释放", name: "HermesGateway")
+                return
+            }
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
+        DMLogger.log("waitForPortRelease: 端口 \(port) 在 \(maxWait)s 内未释放", name: "HermesGateway")
     }
 
     /// 根据端口查找已注册实例。

@@ -31,18 +31,18 @@ final class PetWindowController: NSObject {
             return
         }
 
-        let petSize = viewModel.petSize
+        let contentSize = currentContentSize()
 
         // 创建独立 NSPanel — 不依赖 WindowGroup
         let contentView = PetImageView(viewModel: viewModel)
             .background(Color.clear)
 
         let hostingView = NSHostingView(rootView: contentView)
-        hostingView.frame = NSRect(x: 0, y: 0, width: petSize.width, height: petSize.height)
+        hostingView.frame = NSRect(x: 0, y: 0, width: contentSize.width, height: contentSize.height)
         hostingView.autoresizingMask = [.width, .height]
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: petSize.width, height: petSize.height),
+            contentRect: NSRect(x: 0, y: 0, width: contentSize.width, height: contentSize.height),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -76,9 +76,9 @@ final class PetWindowController: NSObject {
         // 居中放置
         if let screen = NSScreen.main {
             let screenFrame = screen.visibleFrame
-            let x = screenFrame.midX - petSize.width / 2
-            let y = screenFrame.midY - petSize.height / 2
-            panel.setFrame(NSRect(x: x, y: y, width: petSize.width, height: petSize.height), display: false)
+            let x = screenFrame.midX - contentSize.width / 2
+            let y = screenFrame.midY - contentSize.height / 2
+            panel.setFrame(NSRect(x: x, y: y, width: contentSize.width, height: contentSize.height), display: false)
         }
 
         self.panel = panel
@@ -107,6 +107,13 @@ final class PetWindowController: NSObject {
     /// 桌宠窗口当前是否可见。
     var isVisible: Bool {
         panel?.isVisible ?? false
+    }
+
+    // MARK: - Content Size
+
+    private func currentContentSize() -> CGSize {
+        let bubbleHeight = viewModel.isListeningBubbleVisible ? viewModel.listeningBubbleHeight : 0
+        return CGSize(width: viewModel.petSize.width, height: viewModel.petSize.height + bubbleHeight)
     }
 
     // MARK: - Settings Bindings

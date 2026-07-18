@@ -83,6 +83,7 @@ final class VoiceShortcutCoordinator {
                 return
             }
             self.accumulatedText = text
+            AppDelegate.shared?.petViewModel?.updateListeningTranscript(text)
             DMLogger.log("transcription text=\"\(text)\" isFinal=\(isFinal)", name: "VoiceShortcut")
 
             if isFinal {
