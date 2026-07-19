@@ -64,3 +64,11 @@ enum AppConstants {
         return (resolveHermesHome() as NSString).appendingPathComponent(file)
     }
 }
+
+// MARK: - Notifications
+
+extension Notification.Name {
+    /// 模型配置（主模型 / 辅助任务模型）发生变更并重启 Gateway 后发送。
+    /// 订阅方（如 AI 对话页）应据此刷新会话列表、当前模型显示及当前会话数据。
+    static let modelConfigDidChange = Notification.Name("com.deskmate.modelConfigDidChange")
+}

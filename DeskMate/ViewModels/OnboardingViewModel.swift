@@ -1594,12 +1594,14 @@ class OnboardingViewModel: ObservableObject {
             self.writeAgentConfigIfNeeded()
 
             // 5. 重启 Gateway
-            // 同步等待以确保 onboarding 完成时 gateway 已经用上新配置
+            // 同步等待以确保 onboarding 完成时 gateway 已经用上新配置。
+            // 使用 stopAllGateways() 而非 stopGateway()，确保清理掉崩溃/残留的旧进程，
+            // 避免 8642 端口被占用导致启动失败。
             let gateway = HermesGatewayService.shared
             let semaphore = DispatchSemaphore(value: 0)
             var gatewayStarted = false
             Task {
-                await gateway.stopGateway()
+                await gateway.stopAllGateways()
                 gatewayStarted = await gateway.startGateway()
                 semaphore.signal()
             }

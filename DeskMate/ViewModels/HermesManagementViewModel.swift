@@ -545,6 +545,8 @@ final class HermesManagementViewModel: ObservableObject {
         try? task.run()
 
         DispatchQueue.main.async {
+            // 程序内部重启，跳过退出确认框但仍会执行 Gateway 清理。
+            AppDelegate.shouldSkipQuitConfirmation = true
             NSApplication.shared.terminate(nil)
         }
     }

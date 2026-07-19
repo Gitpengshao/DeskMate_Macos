@@ -289,14 +289,46 @@ final class ModelConfigViewModel: ObservableObject {
 
     // MARK: - Gateway
 
-    /// 重启 Gateway 让配置生效 — 对齐 Flutter `restartGateway`。
+    /// 重启 Gateway 让配置生效，并刷新全局相关状态。
+    /// 对齐 Flutter `restartGateway`。
+    ///
+    /// 使用 `stopAllGateways()` 而非 `stopGateway(for:)`，确保清理崩溃/未正常退出的
+    /// 残留 Hermes Gateway 进程，避免 8642 端口被占用导致新实例启动失败。
     func restartGateway() async {
         DMLogger.log("[ModelConfigVM] restartGateway 开始", name: "ModelConfigVM")
-        await gateway.stopGateway()
-        DMLogger.log("[ModelConfigVM] Gateway 已停止", name: "ModelConfigVM")
-        _ = await gateway.startGateway()
-        DMLogger.log("[ModelConfigVM] Gateway 已启动", name: "ModelConfigVM")
+        await gateway.stopAllGateways()
+        DMLogger.log("[ModelConfigVM] Gateway 已停止并清理残留进程", name: "ModelConfigVM")
+        let started = await gateway.startGateway()
+        DMLogger.log("[ModelConfigVM] Gateway 已启动 success=\(started)", name: "ModelConfigVM")
+
+        // 刷新全局状态：网关连接徽标、AI 对话当前模型显示等。
+        await refreshAppStateAfterModelChange()
+
         gatewayStateChanged.send()
+        NotificationCenter.default.post(name: .modelConfigDidChange, object: nil)
+    }
+
+    /// Gateway 重启成功后刷新整个 App 中与模型相关的状态。
+    /// 重点刷新 AI 对话数据：当前模型徽标、当前会话消息。
+    private func refreshAppStateAfterModelChange() async {
+        DMLogger.log("[ModelConfigVM] 开始刷新全局模型相关状态", name: "ModelConfigVM")
+
+        // 1. 刷新顶部 Gateway 连接状态徽标
+        await GatewayConnectionManager.shared.refresh()
+
+        // 2. 刷新 AI 对话页当前模型显示
+        AiChatViewModel.shared.loadCurrentModel()
+
+        // 3. 如果当前有会话，重新加载该会话以同步最新后端数据
+        if let sessionId = AiChatViewModel.shared.model.sessionId, !sessionId.isEmpty {
+            DMLogger.log(
+                "[ModelConfigVM] 重新加载当前会话 sessionId=\(sessionId)",
+                name: "ModelConfigVM"
+            )
+            AiChatViewModel.shared.loadSession(sessionId)
+        }
+
+        DMLogger.log("[ModelConfigVM] 全局模型相关状态刷新完成", name: "ModelConfigVM")
     }
 
     // MARK: - Discover Models

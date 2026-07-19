@@ -67,6 +67,7 @@ final class HermesGatewayService {
     /// 重启指定 profile 的 Gateway，保持原有端口不变。
     ///
     /// 用于 `terminal.cwd` 等配置变更后让 Hermes 立即重新读取 config.yaml。
+    /// 使用 `stopAllGateways()` 确保清理所有残留进程，避免端口占用导致启动失败。
     func restartGateway(for profile: String?) async -> (port: Int, apiKey: String)? {
         let key = registryKey(for: profile)
         let existingPort = await registry.instances[key]?.port
@@ -76,7 +77,7 @@ final class HermesGatewayService {
             name: "HermesGateway"
         )
 
-        await stopGateway(for: profile)
+        await stopAllGateways()
         return await startGatewayInternal(profile: profile, preferredPort: existingPort)
     }
 
@@ -99,7 +100,18 @@ final class HermesGatewayService {
 
         // 清理应用崩溃或上次未正常退出时残留的 Hermes Gateway 进程，避免端口被占用。
         await killOrphanedGatewayProcesses()
-        await waitForPortRelease(port: AppConstants.defaultGatewayPort, maxWait: 3)
+
+        // 确保默认端口彻底释放：先等 30 秒（覆盖 TCP TIME_WAIT 周期），若仍被占用则强制 SIGKILL 监听进程。
+        // TIME_WAIT 状态下 bind() 会失败但 lsof 看不到 LISTEN 进程，只能等待自然过期。
+        await waitForPortRelease(port: AppConstants.defaultGatewayPort, maxWait: 30)
+        if isPortInUse(port: AppConstants.defaultGatewayPort) {
+            DMLogger.log(
+                "stopAllGateways: 端口 \(AppConstants.defaultGatewayPort) 仍未释放，强制清理监听进程",
+                name: "HermesGateway"
+            )
+            await killListenersOnPort(port: AppConstants.defaultGatewayPort)
+            await waitForPortRelease(port: AppConstants.defaultGatewayPort, maxWait: 15)
+        }
     }
 
     /// 指定 profile 的 Gateway 是否处于就绪状态。
@@ -241,6 +253,16 @@ final class HermesGatewayService {
             await registry.instances.removeValue(forKey: key)
             // 停止进程后等待端口真正释放，避免新进程因 address already in use 启动失败。
             await waitForPortRelease(port: existing.port, maxWait: 3)
+        }
+
+        // 兜底：若目标端口仍被占用（残留进程未被注册或 TIME_WAIT 未过期），强制清理监听进程。
+        if isPortInUse(port: port) {
+            DMLogger.log(
+                "startGatewayInternal: 端口 \(port) 仍被占用，强制清理监听进程",
+                name: "HermesGateway"
+            )
+            await killListenersOnPort(port: port)
+            await waitForPortRelease(port: port, maxWait: 15)
         }
 
         // 读取 profile 目录下的 .env
@@ -388,20 +410,28 @@ final class HermesGatewayService {
     private func killOrphanedGatewayProcesses() async {
         var pids = Set<Int32>()
 
-        // 1. 匹配命令行中包含 hermes_cli.main gateway 的进程（排除 grep 自身）。
-        let cmdOutput = runShellSync(
-            "ps -eo pid,args | grep -E '[h]ermes_cli.main.*gateway' | awk '{print $1}' || true"
-        )
-        for line in cmdOutput.split(separator: "\n") {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if let pid = Int32(trimmed), pid > 0 {
-                pids.insert(pid)
+        // 1. 匹配命令行中包含 hermes gateway 相关字样的进程（排除 grep 自身）。
+        //    使用 ps auxww 显示完整命令行，避免 macOS 截断导致匹配失败。
+        let patterns = [
+            "[h]ermes_cli.main.*gateway",
+            "[h]ermes-agent.*gateway",
+            "[g]ateway/run.py"
+        ]
+        for pattern in patterns {
+            let cmdOutput = runShellSync(
+                "ps auxww | grep -E '\(pattern)' | awk '{print $2}' || true"
+            )
+            for line in cmdOutput.split(separator: "\n") {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if let pid = Int32(trimmed), pid > 0 {
+                    pids.insert(pid)
+                }
             }
         }
 
-        // 2. 查找监听默认 Gateway 端口的进程。
+        // 2. 查找占用默认 Gateway 端口的进程（不限于 LISTEN 状态，更彻底）。
         let portOutput = runShellSync(
-            "lsof -iTCP:\(AppConstants.defaultGatewayPort) -sTCP:LISTEN -P -n | tail -n +2 | awk '{print $2}' || true"
+            "lsof -i:\(AppConstants.defaultGatewayPort) -P -n | tail -n +2 | awk '{print $2}' || true"
         )
         for line in portOutput.split(separator: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -438,7 +468,7 @@ final class HermesGatewayService {
             }
         }
 
-        let killDeadline = Date().addingTimeInterval(2)
+        let killDeadline = Date().addingTimeInterval(3)
         while Date() < killDeadline {
             let remaining = pids.filter { kill($0, 0) == 0 }
             if remaining.isEmpty { break }
@@ -464,6 +494,37 @@ final class HermesGatewayService {
             try? await Task.sleep(nanoseconds: 200_000_000)
         }
         DMLogger.log("waitForPortRelease: 端口 \(port) 在 \(maxWait)s 内未释放", name: "HermesGateway")
+    }
+
+    /// 通过 lsof 查找监听指定端口的进程并强制 SIGKILL。
+    private func killListenersOnPort(port: Int) async {
+        let output = runShellSync(
+            "lsof -iTCP:\(port) -sTCP:LISTEN -P -n | tail -n +2 | awk '{print $2}' || true"
+        )
+        var pids = Set<Int32>()
+        for line in output.split(separator: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if let pid = Int32(trimmed), pid > 0 {
+                pids.insert(pid)
+            }
+        }
+        guard !pids.isEmpty else {
+            DMLogger.log("killListenersOnPort: 未找到监听端口 \(port) 的进程", name: "HermesGateway")
+            return
+        }
+        DMLogger.log(
+            "killListenersOnPort: 对端口 \(port) 的监听进程发送 SIGKILL: \(pids.sorted())",
+            name: "HermesGateway"
+        )
+        for pid in pids {
+            kill(pid, SIGKILL)
+        }
+        let deadline = Date().addingTimeInterval(3)
+        while Date() < deadline {
+            let remaining = pids.filter { kill($0, 0) == 0 }
+            if remaining.isEmpty { break }
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
     }
 
     /// 根据端口查找已注册实例。
@@ -547,7 +608,14 @@ final class HermesGatewayService {
         return (binDir as NSString).appendingPathComponent("python")
     }
 
-    /// 检查端口是否被占用（TCP 连接成功即视为占用）。
+    /// 检查端口是否被占用。
+    ///
+    /// 使用 `bind()` 检测而非 `connect()`，能准确反映 Python 端 `bind()` 是否会成功。
+    /// `connect()` 只能检测是否有进程在 LISTEN，无法检测 TIME_WAIT 状态；
+    /// 而当旧 Gateway 被 SIGTERM 后，socket 会进入 TIME_WAIT（持续 60-120s），
+    /// 此时 `connect()` 返回 ECONNREFUSED（误判为空闲），但 Python `bind()` 会返回
+    /// EADDRINUSE，导致 Gateway 启动失败。使用 `bind()` 检测可避免这种误判。
+    /// 不设置 SO_REUSEADDR，以模拟 Hermes Python 端 api_server 的 bind 行为。
     private func isPortInUse(port: Int) -> Bool {
         let sock = socket(AF_INET, SOCK_STREAM, 0)
         guard sock >= 0 else { return false }
@@ -558,12 +626,13 @@ final class HermesGatewayService {
         addr.sin_port = UInt16(port).bigEndian
         addr.sin_addr.s_addr = inet_addr("127.0.0.1")
 
-        let result = withUnsafePointer(to: &addr) { ptr in
+        let bindResult = withUnsafePointer(to: &addr) { ptr in
             ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
-                connect(sock, sa, socklen_t(MemoryLayout<sockaddr_in>.size))
+                bind(sock, sa, socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
-        return result == 0
+        // bind 返回 -1 表示端口被占用（包括 LISTEN 与 TIME_WAIT 状态）。
+        return bindResult != 0
     }
 
     /// 同步执行 shell 命令并返回输出（用于诊断信息）。

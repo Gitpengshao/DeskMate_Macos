@@ -16,6 +16,7 @@ struct DeskMateNotchContent: View {
     var body: some View {
         if manager.isLoading {
             // 加载中视图：点击后立即展示，避免卡顿无反馈
+            // 当等待 Gateway 启动时显示 "网关启动中"，否则显示 "正在打开控制台…"
             HStack(spacing: 10) {
                 ProgressView()
                     .controlSize(.small)
@@ -25,7 +26,7 @@ struct DeskMateNotchContent: View {
                     Text("DeskMate")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(.white)
-                    Text("正在打开控制台…")
+                    Text(manager.loadingMessage)
                         .font(.system(size: 10, weight: .regular))
                         .foregroundColor(.white.opacity(0.65))
                 }
@@ -267,6 +268,14 @@ final class DynamicNotchManager: ObservableObject {
     /// 是否正在打开控制台 — 用于在灵动岛内展示 loading
     @Published var isLoading: Bool = false
 
+    /// 是否正在等待 Gateway 启动 — 用于在灵动岛内展示 "网关启动中" loading
+    @Published var isWaitingForGateway: Bool = false
+
+    /// 加载状态文案 — 等待 Gateway 时显示 "网关启动中"，否则显示 "正在打开控制台…"
+    var loadingMessage: String {
+        isWaitingForGateway ? "网关启动中" : "正在打开控制台…"
+    }
+
     /// 是否处于 AI 工作态 — 流式输出期间为 true，驱动灵动岛展开 work 动画
     @Published var isWorking: Bool = false
 
@@ -292,6 +301,9 @@ final class DynamicNotchManager: ObservableObject {
 
     /// 防止并发重复刷新
     private var statsRefreshTask: Task<Void, Never>?
+
+    /// 等待 Gateway 启动的 15 秒超时任务
+    private var gatewayWaitTimeoutTask: Task<Void, Never>?
 
     /// 点击灵动岛回调
     var onOpenConsole: (() -> Void)?
@@ -363,10 +375,44 @@ final class DynamicNotchManager: ObservableObject {
     private func handleClick() {
         // 立即进入加载状态，给用户即时反馈
         isLoading = true
+        // Gateway 未就绪时（首次进入 app 或 Gateway 后台启动未完成），
+        // 进入 "网关启动中" 等待状态并启动 15 秒超时，超时后自动清除 loading。
+        if !HermesGatewayService.shared.isReady {
+            startWaitingForGateway()
+        }
         // 延迟到下一 runloop 再触发打开控制台，避免在 loading 视图更新期间同步调用
         // openMainConsole，从而减少 "Modifying state during view update" 与灵动岛动画冲突。
         DispatchQueue.main.async { [weak self] in
             self?.onOpenConsole?()
+        }
+    }
+
+    /// 进入 "网关启动中" 等待状态，15 秒超时后自动清除 loading。
+    /// 超时后灵动岛恢复到默认状态，用户可再次点击重试。
+    func startWaitingForGateway() {
+        isWaitingForGateway = true
+        isLoading = true
+        gatewayWaitTimeoutTask?.cancel()
+        gatewayWaitTimeoutTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 15_000_000_000) // 15s
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard let self = self else { return }
+                guard self.isWaitingForGateway else { return }
+                NSLog("[DynamicNotchManager] 等待 Gateway 启动超时 15s，清除 loading 状态")
+                self.isWaitingForGateway = false
+                self.isLoading = false
+            }
+        }
+    }
+
+    /// Gateway 已就绪或不再需要等待，清除等待状态与超时任务。
+    func clearWaitingForGateway() {
+        gatewayWaitTimeoutTask?.cancel()
+        gatewayWaitTimeoutTask = nil
+        if isWaitingForGateway {
+            NSLog("[DynamicNotchManager] clearWaitingForGateway: 清除等待状态")
+            isWaitingForGateway = false
         }
     }
 
@@ -377,6 +423,7 @@ final class DynamicNotchManager: ObservableObject {
     /// 等 Gateway 启动成功后再调用一次本方法，才会真正展开显示今日汇总。
     func consoleDidOpen() {
         NSLog("[DynamicNotchManager] consoleDidOpen: 进入，isReady=\(HermesGatewayService.shared.isReady)")
+        clearWaitingForGateway()
         isLoading = false
         if HermesGatewayService.shared.isReady {
             isConsoleOpen = true

@@ -58,6 +58,18 @@ struct AiChatPage: View {
                 inputText = newValue
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .modelConfigDidChange)) { _ in
+            // 模型配置变更并重启 Gateway 后，刷新 AI 对话相关数据。
+            // 异步到下一帧执行，避免在 SwiftUI 更新周期中直接修改 @Published 状态。
+            DispatchQueue.main.async {
+                DMLogger.log("[AiChatPage] 收到 modelConfigDidChange，刷新会话列表与当前模型", name: "AiChatPage")
+                sessionVM.refresh()
+                chatVM.loadCurrentModel()
+                if let sessionId = chatVM.model.sessionId, !sessionId.isEmpty {
+                    chatVM.loadSession(sessionId)
+                }
+            }
+        }
         .onReceive(WorkspaceReferenceBridge.shared.$pendingReference) { _ in
             // bridge 发布新值时立刻消费，覆盖"AI 对话页已在前台"的场景。
             // ⚠️ onReceive 在 SwiftUI 更新周期中触发，必须 async 到下一帧

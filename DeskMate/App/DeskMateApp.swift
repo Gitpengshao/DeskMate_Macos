@@ -38,6 +38,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastHermesCheckResult: Bool?
     private var lastHermesCheckTime: Date?
     private let hermesCheckCacheInterval: TimeInterval = 5.0
+    /// 本次运行中强制展示 Onboarding（不持久化修改 onboarding_completed），用于 Gateway 启动失败等临时异常。
+    private var forceShowOnboarding = false
+
+    /// 程序内部重启时跳过退出确认框。
+    nonisolated(unsafe) static var shouldSkipQuitConfirmation = false
+
+    /// 退出行为偏好键。
+    private enum QuitPreferences {
+        static let suppressPromptKey = "quit_prompt_suppressed"
+        static let killByDefaultKey = "quit_kill_gateways_default"
+    }
 
     /// 主控制台或 Onboarding 窗口是否处于打开状态。
     var isConsoleOpen: Bool {
@@ -163,8 +174,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                 await self?.startHermesGatewayIfNeeded()
                             }
                         } else {
-                            NSLog("[AppDelegate] onboarding_completed=true 但 Hermes 环境缺失，重置标志并打开 Onboarding")
-                            UserDefaults.standard.set(false, forKey: "onboarding_completed")
+                            NSLog("[AppDelegate] onboarding_completed=true 但 Hermes 环境缺失，打开 Onboarding（不重置完成标志）")
+                            self?.forceShowOnboarding = true
                             self?.openConsole()
                         }
                     }
@@ -208,10 +219,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApplication.shared.setActivationPolicy(.regular)
 
         let onboardingCompleted = UserDefaults.standard.bool(forKey: "onboarding_completed")
-        if onboardingCompleted {
+        if onboardingCompleted && !forceShowOnboarding {
             openMainConsole()
             return
         }
+        forceShowOnboarding = false
 
         // Onboarding 窗口（已存在则提到前面）
         if let existingWindow = onboardingWindow {
@@ -267,8 +279,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let envReady = await self.isHermesEnvironmentReady()
             guard envReady else {
                 await MainActor.run {
-                    NSLog("[AppDelegate] openMainConsole: Hermes 环境缺失，重定向到 Onboarding")
-                    UserDefaults.standard.set(false, forKey: "onboarding_completed")
+                    NSLog("[AppDelegate] openMainConsole: Hermes 环境缺失，打开 Onboarding（不重置完成标志）")
+                    self.forceShowOnboarding = true
                     self.openConsole()
                 }
                 return
@@ -281,8 +293,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if gatewayReady {
                     self.continueOpenMainConsole(envReady: true)
                 } else {
-                    NSLog("[AppDelegate] openMainConsole: Gateway 启动失败，重定向到 Onboarding")
-                    UserDefaults.standard.set(false, forKey: "onboarding_completed")
+                    NSLog("[AppDelegate] openMainConsole: Gateway 启动失败，打开 Onboarding（不重置完成标志）")
+                    self.forceShowOnboarding = true
+                    // 立即取消 "网关启动中" 的 15s 超时任务，避免与 Onboarding 跳转冲突。
+                    self.notchManager.clearWaitingForGateway()
                     self.notchManager.isLoading = false
                     self.openConsole()
                 }
@@ -293,10 +307,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `openMainConsole` 的主线程续接 — 环境与 Gateway 均已就绪，直接展示主控制台窗口。
     private func continueOpenMainConsole(envReady: Bool) {
         NSLog("[AppDelegate] continueOpenMainConsole: envReady=\(envReady)")
-        // 环境缺失兜底：重置 onboarding 标志并跳转 OnboardingView
+        // 环境缺失兜底：不重置 onboarding 标志，仅临时打开 OnboardingView
         guard envReady else {
-            NSLog("[AppDelegate] continueOpenMainConsole: envReady=false，重定向到 Onboarding")
-            UserDefaults.standard.set(false, forKey: "onboarding_completed")
+            NSLog("[AppDelegate] continueOpenMainConsole: envReady=false，打开 Onboarding（不重置完成标志）")
+            self.forceShowOnboarding = true
             mainWindow?.close()
             mainWindow = nil
             openConsole()
@@ -382,8 +396,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let ready = await self?.isHermesEnvironmentReady() ?? false
             await MainActor.run {
                 if !ready {
-                    NSLog("[AppDelegate] 首页兜底检测：Hermes 环境缺失，重定向到 Onboarding")
-                    UserDefaults.standard.set(false, forKey: "onboarding_completed")
+                    NSLog("[AppDelegate] 首页兜底检测：Hermes 环境缺失，打开 Onboarding（不重置完成标志）")
+                    self?.forceShowOnboarding = true
                     self?.mainWindow?.close()
                     self?.mainWindow = nil
                     self?.openConsole()
@@ -472,14 +486,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        NSLog("[AppDelegate] applicationShouldTerminate: 准备停止所有 Gateway")
-        Task.detached {
-            await HermesGatewayService.shared.stopAllGateways()
-            await MainActor.run {
-                NSApp.reply(toApplicationShouldTerminate: true)
-            }
+        NSLog("[AppDelegate] applicationShouldTerminate: 收到退出请求")
+
+        // 1. 程序内部重启：跳过确认框，但仍默认停止 Gateway，确保新实例启动时端口已释放。
+        if Self.shouldSkipQuitConfirmation {
+            Self.shouldSkipQuitConfirmation = false
+            NSLog("[AppDelegate] applicationShouldTerminate: 程序内部重启，跳过确认框并停止 Gateway")
+            return startQuitCleanup(killGateways: true)
+        }
+
+        // 2. 用户已选择“记住选择”，直接按偏好执行。
+        let suppressed = UserDefaults.standard.bool(forKey: QuitPreferences.suppressPromptKey)
+        if suppressed {
+            let killByDefault = UserDefaults.standard.bool(forKey: QuitPreferences.killByDefaultKey)
+            NSLog("[AppDelegate] applicationShouldTerminate: 已记忆偏好 killGateways=\(killByDefault)")
+            return startQuitCleanup(killGateways: killByDefault)
+        }
+
+        // 3. 弹出确认框（terminateLater 会暂停退出流程，等 alert 结束后再 reply）。
+        DispatchQueue.main.async { [weak self] in
+            self?.presentQuitAlert()
         }
         return .terminateLater
+    }
+
+    /// 显示退出确认框，左下角带“以后默认此选项”勾选框。
+    private func presentQuitAlert() {
+        let alert = NSAlert()
+        alert.messageText = "退出 DeskMate"
+        alert.informativeText = "是否同时停止所有 Hermes Gateway 进程？"
+        alert.addButton(withTitle: "停止并退出")
+        alert.addButton(withTitle: "仅退出应用")
+        alert.showsSuppressionButton = true
+        alert.suppressionButton?.title = "以后默认此选项"
+
+        let response = alert.runModal()
+        let killGateways = (response == .alertFirstButtonReturn)
+        let remember = (alert.suppressionButton?.state == .on)
+
+        NSLog("[AppDelegate] presentQuitAlert: 选择=\(killGateways ? "停止并退出" : "仅退出应用"), 记住=\(remember)")
+
+        if remember {
+            UserDefaults.standard.set(true, forKey: QuitPreferences.suppressPromptKey)
+            UserDefaults.standard.set(killGateways, forKey: QuitPreferences.killByDefaultKey)
+        }
+
+        _ = startQuitCleanup(killGateways: killGateways)
+    }
+
+    /// 执行退出清理并回复系统是否允许退出。
+    private func startQuitCleanup(killGateways: Bool) -> NSApplication.TerminateReply {
+        NSLog("[AppDelegate] startQuitCleanup: killGateways=\(killGateways)")
+        if killGateways {
+            // 异步关闭 Gateway，不阻塞退出流程，确保 app 立即响应退出。
+            Task.detached {
+                await HermesGatewayService.shared.stopAllGateways()
+            }
+        }
+        return .terminateNow
     }
 }
 
