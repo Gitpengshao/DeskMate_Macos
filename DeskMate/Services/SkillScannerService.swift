@@ -17,16 +17,18 @@ nonisolated final class SkillScannerService {
     // MARK: - Paths
 
     /// `~/.hermes/hermes-agent/optional-skills/` — 官方可选技能目录。
-    static func optionalSkillsDir() -> URL {
-        let hermesHome = AppConstants.resolveHermesHome()
+    /// - Parameter profile: 目标 profile id；nil / "default" 表示默认 profile。
+    static func optionalSkillsDir(profile: String? = nil) -> URL {
+        let hermesHome = AppConstants.resolveHermesHome(for: profile)
         return URL(fileURLWithPath: hermesHome)
             .appendingPathComponent("hermes-agent", isDirectory: true)
             .appendingPathComponent("optional-skills", isDirectory: true)
     }
 
     /// `~/.hermes/skills/` — 已安装技能根目录。
-    static func installedSkillsDir() -> URL {
-        let hermesHome = AppConstants.resolveHermesHome()
+    /// - Parameter profile: 目标 profile id；nil / "default" 表示默认 profile。
+    static func installedSkillsDir(profile: String? = nil) -> URL {
+        let hermesHome = AppConstants.resolveHermesHome(for: profile)
         return URL(fileURLWithPath: hermesHome)
             .appendingPathComponent("skills", isDirectory: true)
     }
@@ -35,13 +37,20 @@ nonisolated final class SkillScannerService {
 
     /// 扫描已安装技能 `~/.hermes/skills/` 并按分类返回 `RawSkillInfo` 列表。
     /// 结果形如：["apple": [RawSkillInfo, ...], "creative": [...], ...]
-    func scanSkills() throws -> [String: [RawSkillInfo]] {
-        let hermesHome = AppConstants.resolveHermesHome()
-        let skillsDir = URL(fileURLWithPath: hermesHome)
-            .appendingPathComponent("skills", isDirectory: true)
+    /// - Parameter profile: 目标 profile id；nil / "default" 表示默认 profile。
+    func scanSkills(profile: String? = nil) throws -> [String: [RawSkillInfo]] {
+        let skillsDir = Self.installedSkillsDir(profile: profile)
+        DMLogger.log(
+            "[SkillScannerService] scanSkills profile=\(profile ?? "default") dir=\(skillsDir.path)",
+            name: "SkillScannerService"
+        )
 
         let fm = FileManager.default
         guard fm.fileExists(atPath: skillsDir.path) else {
+            DMLogger.log(
+                "[SkillScannerService] scanSkills dir not found",
+                name: "SkillScannerService"
+            )
             return [:]
         }
 
@@ -103,6 +112,11 @@ nonisolated final class SkillScannerService {
             }
         }
 
+        let total = result.values.reduce(0) { $0 + $1.count }
+        DMLogger.log(
+            "[SkillScannerService] scanSkills DONE profile=\(profile ?? "default") categories=\(result.count) totalSkills=\(total)",
+            name: "SkillScannerService"
+        )
         return result
     }
 
@@ -115,19 +129,24 @@ nonisolated final class SkillScannerService {
     /// - 此处不要求技能已安装到 `~/.hermes/skills/`
     /// - `isEnabled` 反映该可选技能当前是否已被用户安装启用
     /// - 分类目录名直接来自 `optional-skills/<category>/<skill>/`
-    func scanOptionalSkills() throws -> [String: [OptionalSkillInfo]] {
-        let optDir = Self.optionalSkillsDir()
+    /// - Parameter profile: 目标 profile id；nil / "default" 表示默认 profile。
+    func scanOptionalSkills(profile: String? = nil) throws -> [String: [OptionalSkillInfo]] {
+        let optDir = Self.optionalSkillsDir(profile: profile)
+        DMLogger.log(
+            "[SkillScannerService] scanOptionalSkills profile=\(profile ?? "default") dir=\(optDir.path)",
+            name: "SkillScannerService"
+        )
         let fm = FileManager.default
         guard fm.fileExists(atPath: optDir.path) else {
             DMLogger.log(
-                "scanOptionalSkills: optional-skills 目录不存在 \(optDir.path)",
+                "[SkillScannerService] scanOptionalSkills dir not found \(optDir.path)",
                 name: "SkillScannerService"
             )
             return [:]
         }
 
         // 已安装技能 id 集合 — 用于标记 isEnabled
-        let installedIds = try collectInstalledIds()
+        let installedIds = try collectInstalledIds(profile: profile)
 
         var result: [String: [OptionalSkillInfo]] = [:]
 
@@ -177,13 +196,19 @@ nonisolated final class SkillScannerService {
             }
         }
 
+        let total = result.values.reduce(0) { $0 + $1.count }
+        DMLogger.log(
+            "[SkillScannerService] scanOptionalSkills DONE profile=\(profile ?? "default") categories=\(result.count) totalSkills=\(total)",
+            name: "SkillScannerService"
+        )
         return result
     }
 
     /// 收集 `~/.hermes/skills/` 下所有技能 id 集合。
     /// 来自 SKILL.md 扫描结果（内置 + 用户安装）。
-    private func collectInstalledIds() throws -> Set<String> {
-        let installed = try scanSkills()
+    /// - Parameter profile: 目标 profile id；nil / "default" 表示默认 profile。
+    private func collectInstalledIds(profile: String? = nil) throws -> Set<String> {
+        let installed = try scanSkills(profile: profile)
         var ids: Set<String> = []
         for (_, list) in installed {
             for raw in list { ids.insert(raw.id) }

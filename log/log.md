@@ -1,143 +1,146 @@
 [AppDelegate] updateConsoleKeyState: mainWindow.isKeyWindow=false, onboardingWindow.isKeyWindow=false, isConsoleKeyWindow=false
-[AppDelegate] updateConsoleKeyState: mainWindow.isKeyWindow=true, onboardingWindow.isKeyWindow=false, isConsoleKeyWindow=true
 [AppDelegate] handleAppDidBecomeActive
-[AppDelegate] updateConsoleKeyState: mainWindow.isKeyWindow=true, onboardingWindow.isKeyWindow=false, isConsoleKeyWindow=true
-[AppDelegate] updateConsoleKeyState: mainWindow.isKeyWindow=false, onboardingWindow.isKeyWindow=false, isConsoleKeyWindow=false
-[AppDelegate] updateConsoleKeyState: mainWindow.isKeyWindow=false, onboardingWindow.isKeyWindow=false, isConsoleKeyWindow=false
-[2026-07-19 12:38:58.828] [INFO] [ModelConfigVM] [ModelConfigVM] updateCurrentModel provider=siliconflow model=moonshotai/Kimi-K2.6-Code  ← ModelConfigViewModel.swift:141
-[2026-07-19 12:38:58.828] [INFO] [ModelConfigVM] [ModelConfigVM] updateCurrentModel provider=siliconflow model=moonshotai/Kimi-K2.6-Code  ← ModelConfigViewModel.swift:141
-[2026-07-19 12:38:58.828] [INFO] [HermesConfigWriter] [writeApiKeyToEnv] provider=siliconflow envVarName=SILICONFLOW_API_KEY apiKey=有值(长度51)  ← HermesConfigWriter.swift:520
-[2026-07-19 12:38:58.828] [INFO] [HermesConfigWriter] [writeApiKeyToEnv] provider=siliconflow envVarName=SILICONFLOW_API_KEY apiKey=有值(长度51)  ← HermesConfigWriter.swift:520
-[2026-07-19 12:38:58.830] [INFO] [HermesConfigWriter] [writeApiKeyToEnv] updated line at 498  ← HermesConfigWriter.swift:542
-[2026-07-19 12:38:58.830] [INFO] [HermesConfigWriter] [writeApiKeyToEnv] updated line at 498  ← HermesConfigWriter.swift:542
-[2026-07-19 12:38:58.834] [INFO] [HermesConfigWriter] [writeApiKeyToEnv] wrote 24430 chars to env  ← HermesConfigWriter.swift:560
-[2026-07-19 12:38:58.834] [INFO] [HermesConfigWriter] [writeApiKeyToEnv] wrote 24430 chars to env  ← HermesConfigWriter.swift:560
-[2026-07-19 12:38:58.834] [INFO] [HermesConfigWriter] [writeModelConfig] provider=siliconflow model=moonshotai/Kimi-K2.6-Code baseUrl=nil  ← HermesConfigWriter.swift:147
-[2026-07-19 12:38:58.834] [INFO] [HermesConfigWriter] [writeModelConfig] provider=siliconflow model=moonshotai/Kimi-K2.6-Code baseUrl=nil  ← HermesConfigWriter.swift:147
-[2026-07-19 12:38:58.845] [INFO] [HermesConfigWriter] [writeModelConfig] wrote config.yaml  ← HermesConfigWriter.swift:178
-[2026-07-19 12:38:58.845] [INFO] [HermesConfigWriter] [writeModelConfig] wrote config.yaml  ← HermesConfigWriter.swift:178
-[2026-07-19 12:38:58.846] [INFO] [ModelConfigVM] writeAgentConfigIfNeeded: wrote agent block with 9 personalities  ← ModelConfigViewModel.swift:217
-[2026-07-19 12:38:58.846] [INFO] [ModelConfigVM] writeAgentConfigIfNeeded: wrote agent block with 9 personalities  ← ModelConfigViewModel.swift:217
-[2026-07-19 12:38:58.846] [INFO] [ModelConfigVM] [ModelConfigVM] restartGateway 开始  ← ModelConfigViewModel.swift:298
-[2026-07-19 12:38:58.846] [INFO] [ModelConfigVM] [ModelConfigVM] restartGateway 开始  ← ModelConfigViewModel.swift:298
-[2026-07-19 12:38:58.854] [INFO] [HermesGateway] stopAllGateways: 停止 pid=28574 port=8642  ← HermesGatewayService.swift:93
-[2026-07-19 12:38:58.854] [INFO] [HermesGateway] stopAllGateways: 停止 pid=28574 port=8642  ← HermesGatewayService.swift:93
-[2026-07-19 12:38:59.275] [INFO] [HermesGateway] stopProcess: 端口 8642 已释放  ← HermesGatewayService.swift:400
-[2026-07-19 12:38:59.275] [INFO] [HermesGateway] stopProcess: 端口 8642 已释放  ← HermesGatewayService.swift:400
-[2026-07-19 12:38:59.595] [INFO] [HermesGateway] waitForPortRelease: 端口 8642 已释放  ← HermesGatewayService.swift:490
-[2026-07-19 12:38:59.595] [INFO] [HermesGateway] waitForPortRelease: 端口 8642 已释放  ← HermesGatewayService.swift:490
-[2026-07-19 12:38:59.595] [INFO] [ModelConfigVM] [ModelConfigVM] Gateway 已停止并清理残留进程  ← ModelConfigViewModel.swift:300
-[2026-07-19 12:38:59.595] [INFO] [ModelConfigVM] [ModelConfigVM] Gateway 已停止并清理残留进程  ← ModelConfigViewModel.swift:300
-[HermesGateway] startGatewayInternal: profile=default hermesHome=/Users/mac002/.hermes
-[HermesGateway] startGatewayInternal: pythonPath=/Users/mac002/.hermes/hermes-agent/venv/bin/python
-[HermesGateway] startGatewayInternal: pythonPath 存在=true
-[HermesGateway] startGatewayInternal: 使用 port=8642
-[HermesGateway] startGatewayInternal: .env 文件内容长度=24430
-[HermesGateway] startGatewayInternal: .env key: TERMINAL_MODAL_IMAGE=nikolaik...
-[HermesGateway] startGatewayInternal: .env key: TERMINAL_TIMEOUT=60
-[HermesGateway] startGatewayInternal: .env key: TERMINAL_LIFETIME_SECONDS=300
-[HermesGateway] startGatewayInternal: .env key: BROWSERBASE_PROXIES=true
-[HermesGateway] startGatewayInternal: .env key: BROWSERBASE_ADVANCED_STEALTH=false
-[HermesGateway] startGatewayInternal: .env key: BROWSER_SESSION_TIMEOUT=300
-[HermesGateway] startGatewayInternal: .env key: BROWSER_INACTIVITY_TIMEOUT=120
-[HermesGateway] startGatewayInternal: .env key: WEB_TOOLS_DEBUG=false
-[HermesGateway] startGatewayInternal: .env key: VISION_TOOLS_DEBUG=false
-[HermesGateway] startGatewayInternal: .env key: MOA_TOOLS_DEBUG=false
-[HermesGateway] startGatewayInternal: .env key: IMAGE_TOOLS_DEBUG=false
-[HermesGateway] startGatewayInternal: .env key: API_SERVER_KEY=d52588d2...
-[HermesGateway] startGatewayInternal: .env key: SILICONFLOW_API_KEY=sk-dzqre...
-[HermesGateway] startGatewayInternal: 确保 API_SERVER_KEY...
-[2026-07-19 12:38:59.600] [INFO] [HermesGateway] _ensureApiServerKey: found existing key  ← HermesGatewayService.swift:565
-[2026-07-19 12:38:59.600] [INFO] [HermesGateway] _ensureApiServerKey: found existing key  ← HermesGatewayService.swift:565
-[HermesGateway] startGatewayInternal: API_SERVER_KEY 已就绪
-[HermesGateway] startGatewayInternal: 启动参数=["-m", "hermes_cli.main", "gateway", "run", "--replace"]
-[HermesGateway] startGatewayInternal: 调用 process.run()...
-[HermesGateway] startGatewayInternal: Gateway 进程已启动, pid=28609, isRunning=true
-[HermesGateway] startGatewayInternal: 开始轮询健康检查...
-[HermesGateway] _waitForGatewayReady: 第 1 次健康检查 (port=8642)...
-nw_socket_handle_socket_event [C5:2] Socket SO_ERROR [61: Connection refused]
-nw_endpoint_flow_failed_with_error [C5 127.0.0.1:8642 in_progress socket-flow (satisfied (Path is satisfied), viable, interface: lo0)] already failing, returning
-Connection 5: received failure notification
-Connection 5: failed to connect 1:61, reason -1
-Connection 5: encountered error(1:61)
-nw_connection_copy_protocol_metadata_internal_block_invoke [C5] Client called nw_connection_copy_protocol_metadata_internal on unconnected nw_connection
-nw_connection_copy_protocol_metadata_internal_block_invoke [C5] Client called nw_connection_copy_protocol_metadata_internal on unconnected nw_connection
-nw_connection_copy_protocol_metadata_internal_block_invoke [C5] Client called nw_connection_copy_protocol_metadata_internal on unconnected nw_connection
-nw_connection_copy_connected_local_endpoint_block_invoke [C5] Client called nw_connection_copy_connected_local_endpoint on unconnected nw_connection
-nw_connection_copy_connected_remote_endpoint_block_invoke [C5] Client called nw_connection_copy_connected_remote_endpoint on unconnected nw_connection
-Task <113F68B7-2BF2-438F-8C8F-D059A39902B3>.<10> HTTP load failed, 0/0 bytes (error code: -1004 [1:61])
-Task <113F68B7-2BF2-438F-8C8F-D059A39902B3>.<10> finished with error [-1004] Error Domain=NSURLErrorDomain Code=-1004 "Could not connect to the server." UserInfo={_kCFStreamErrorCodeKey=61, NSUnderlyingError=0x9b3059b30 {Error Domain=kCFErrorDomainCFNetwork Code=-1004 "(null)" UserInfo={_NSURLErrorNWPathKey=satisfied (Path is satisfied), viable, interface: lo0, _kCFStreamErrorCodeKey=61, _kCFStreamErrorDomainKey=1}}, _NSURLErrorFailingURLSessionTaskErrorKey=LocalDataTask <113F68B7-2BF2-438F-8C8F-D059A39902B3>.<10>, _NSURLErrorRelatedURLSessionTaskErrorKey=(
-    "LocalDataTask <113F68B7-2BF2-438F-8C8F-D059A39902B3>.<10>"
-), NSLocalizedDescription=Could not connect to the server., NSErrorFailingURLStringKey=http://127.0.0.1:8642/health, NSErrorFailingURLKey=http://127.0.0.1:8642/health, _kCFStreamErrorDomainKey=1}
-[HermesGateway] _waitForGatewayReady: 第 1 次健康检查失败，1s 后重试
-┌─────────────────────────────────────────────────────────┐
-│           ⚕ Hermes Gateway Starting...                 │
-├─────────────────────────────────────────────────────────┤
-│  Messaging platforms + cron scheduler                    │
-│  Press Ctrl+C to stop                                   │
-└─────────────────────────────────────────────────────────┘
-
-[HermesGateway] _waitForGatewayReady: 第 2 次健康检查 (port=8642)...
-nw_socket_handle_socket_event [C6:2] Socket SO_ERROR [61: Connection refused]
-nw_endpoint_flow_failed_with_error [C6 127.0.0.1:8642 in_progress socket-flow (satisfied (Path is satisfied), viable, interface: lo0)] already failing, returning
-Connection 6: received failure notification
-Connection 6: failed to connect 1:61, reason -1
-Connection 6: encountered error(1:61)
-nw_connection_copy_protocol_metadata_internal_block_invoke [C6] Client called nw_connection_copy_protocol_metadata_internal on unconnected nw_connection
-nw_connection_copy_protocol_metadata_internal_block_invoke [C6] Client called nw_connection_copy_protocol_metadata_internal on unconnected nw_connection
-nw_connection_copy_protocol_metadata_internal_block_invoke [C6] Client called nw_connection_copy_protocol_metadata_internal on unconnected nw_connection
-nw_connection_copy_connected_local_endpoint_block_invoke [C6] Client called nw_connection_copy_connected_local_endpoint on unconnected nw_connection
-nw_connection_copy_connected_remote_endpoint_block_invoke [C6] Client called nw_connection_copy_connected_remote_endpoint on unconnected nw_connection
-Task <D8369559-90AC-469C-92A5-D4E4BEBE9649>.<11> HTTP load failed, 0/0 bytes (error code: -1004 [1:61])
-Task <D8369559-90AC-469C-92A5-D4E4BEBE9649>.<11> finished with error [-1004] Error Domain=NSURLErrorDomain Code=-1004 "Could not connect to the server." UserInfo={_kCFStreamErrorCodeKey=61, NSUnderlyingError=0x9b3290ab0 {Error Domain=kCFErrorDomainCFNetwork Code=-1004 "(null)" UserInfo={_NSURLErrorNWPathKey=satisfied (Path is satisfied), viable, interface: lo0, _kCFStreamErrorCodeKey=61, _kCFStreamErrorDomainKey=1}}, _NSURLErrorFailingURLSessionTaskErrorKey=LocalDataTask <D8369559-90AC-469C-92A5-D4E4BEBE9649>.<11>, _NSURLErrorRelatedURLSessionTaskErrorKey=(
-    "LocalDataTask <D8369559-90AC-469C-92A5-D4E4BEBE9649>.<11>"
-), NSLocalizedDescription=Could not connect to the server., NSErrorFailingURLStringKey=http://127.0.0.1:8642/health, NSErrorFailingURLKey=http://127.0.0.1:8642/health, _kCFStreamErrorDomainKey=1}
-[HermesGateway] _waitForGatewayReady: Gateway 进程已退出，停止等待
-[HermesGateway] startGatewayInternal: 健康检查结果=false
-[2026-07-19 12:39:00.676] [INFO] [ModelConfigVM] [ModelConfigVM] Gateway 已启动 success=false  ← ModelConfigViewModel.swift:302
-[2026-07-19 12:39:00.676] [INFO] [ModelConfigVM] [ModelConfigVM] Gateway 已启动 success=false  ← ModelConfigViewModel.swift:302
-[2026-07-19 12:39:00.676] [INFO] [ModelConfigVM] [ModelConfigVM] 开始刷新全局模型相关状态  ← ModelConfigViewModel.swift:314
-[2026-07-19 12:39:00.676] [INFO] [ModelConfigVM] [ModelConfigVM] 开始刷新全局模型相关状态  ← ModelConfigViewModel.swift:314
-nw_socket_handle_socket_event [C7:2] Socket SO_ERROR [61: Connection refused]
-nw_endpoint_flow_failed_with_error [C7 127.0.0.1:8642 in_progress socket-flow (satisfied (Path is satisfied), viable, interface: lo0)] already failing, returning
-Connection 7: received failure notification
-Connection 7: failed to connect 1:61, reason -1
-Connection 7: encountered error(1:61)
-nw_connection_copy_protocol_metadata_internal_block_invoke [C7] Client called nw_connection_copy_protocol_metadata_internal on unconnected nw_connection
-nw_connection_copy_protocol_metadata_internal_block_invoke [C7] Client called nw_connection_copy_protocol_metadata_internal on unconnected nw_connection
-nw_connection_copy_protocol_metadata_internal_block_invoke [C7] Client called nw_connection_copy_protocol_metadata_internal on unconnected nw_connection
-nw_connection_copy_connected_local_endpoint_block_invoke [C7] Client called nw_connection_copy_connected_local_endpoint on unconnected nw_connection
-nw_connection_copy_connected_remote_endpoint_block_invoke [C7] Client called nw_connection_copy_connected_remote_endpoint on unconnected nw_connection
-Task <5227785E-D8D7-4E64-BDD4-07239F720C64>.<12> HTTP load failed, 0/0 bytes (error code: -1004 [1:61])
-Task <5227785E-D8D7-4E64-BDD4-07239F720C64>.<12> finished with error [-1004] Error Domain=NSURLErrorDomain Code=-1004 "Could not connect to the server." UserInfo={_kCFStreamErrorCodeKey=61, NSUnderlyingError=0x9b3291a10 {Error Domain=kCFErrorDomainCFNetwork Code=-1004 "(null)" UserInfo={_NSURLErrorNWPathKey=satisfied (Path is satisfied), viable, interface: lo0, _kCFStreamErrorCodeKey=61, _kCFStreamErrorDomainKey=1}}, _NSURLErrorFailingURLSessionTaskErrorKey=LocalDataTask <5227785E-D8D7-4E64-BDD4-07239F720C64>.<12>, _NSURLErrorRelatedURLSessionTaskErrorKey=(
-    "LocalDataTask <5227785E-D8D7-4E64-BDD4-07239F720C64>.<12>"
-), NSLocalizedDescription=Could not connect to the server., NSErrorFailingURLStringKey=http://127.0.0.1:8642/health, NSErrorFailingURLKey=http://127.0.0.1:8642/health, _kCFStreamErrorDomainKey=1}
-[2026-07-19 12:39:00.679] [INFO] [ModelConfigVM] [ModelConfigVM] 全局模型相关状态刷新完成  ← ModelConfigViewModel.swift:331
-[2026-07-19 12:39:00.679] [INFO] [ModelConfigVM] [ModelConfigVM] 全局模型相关状态刷新完成  ← ModelConfigViewModel.swift:331
-[2026-07-19 12:39:00.679] [INFO] [ModelConfigVM] [ModelConfigVM] load 开始...  ← ModelConfigViewModel.swift:56
-[2026-07-19 12:39:00.679] [INFO] [ModelConfigVM] [ModelConfigVM] load 开始...  ← ModelConfigViewModel.swift:56
-[2026-07-19 12:39:00.687] [INFO] [HermesConfigWriter] parseModelBlock: provider=custom model=moonshotai/Kimi-K2.6-Code baseUrl=https://api.siliconflow.cn/v1  ← HermesConfigWriter.swift:131
-[2026-07-19 12:39:00.687] [INFO] [HermesConfigWriter] parseModelBlock: provider=custom model=moonshotai/Kimi-K2.6-Code baseUrl=https://api.siliconflow.cn/v1  ← HermesConfigWriter.swift:131
-[2026-07-19 12:39:00.694] [INFO] [ModelConfigVM] [ModelConfigVM] load 完成: provider=siliconflow model=moonshotai/Kimi-K2.6-Code aux overrides=false  ← ModelConfigViewModel.swift:111
-[2026-07-19 12:39:00.694] [INFO] [ModelConfigVM] [ModelConfigVM] load 完成: provider=siliconflow model=moonshotai/Kimi-K2.6-Code aux overrides=false  ← ModelConfigViewModel.swift:111
 [AppDelegate] updateConsoleKeyState: mainWindow.isKeyWindow=false, onboardingWindow.isKeyWindow=false, isConsoleKeyWindow=false
 [AppDelegate] updateConsoleKeyState: mainWindow.isKeyWindow=true, onboardingWindow.isKeyWindow=false, isConsoleKeyWindow=true
-[2026-07-19 12:39:01.045] [INFO] [ModelConfigService] parseModelSection: provider=custom, default=moonshotai/Kimi-K2.6-Code, displayName=Kimi-K2.6-Code  ← ModelConfigService.swift:156
-[2026-07-19 12:39:01.045] [INFO] [ModelConfigService] parseModelSection: provider=custom, default=moonshotai/Kimi-K2.6-Code, displayName=Kimi-K2.6-Code  ← ModelConfigService.swift:156
-[2026-07-19 12:39:01.045] [INFO] [AiChatVM] loadCurrentModel: currentModel=moonshotai/Kimi-K2.6-Code  ← AiChatViewModel.swift:909
-[2026-07-19 12:39:01.045] [INFO] [AiChatVM] loadCurrentModel: currentModel=moonshotai/Kimi-K2.6-Code  ← AiChatViewModel.swift:909
-nw_socket_handle_socket_event [C8:2] Socket SO_ERROR [61: Connection refused]
-nw_endpoint_flow_failed_with_error [C8 127.0.0.1:8642 in_progress socket-flow (satisfied (Path is satisfied), viable, interface: lo0)] already failing, returning
-Connection 8: received failure notification
-Connection 8: failed to connect 1:61, reason -1
-Connection 8: encountered error(1:61)
-nw_connection_copy_protocol_metadata_internal_block_invoke [C8] Client called nw_connection_copy_protocol_metadata_internal on unconnected nw_connection
-nw_connection_copy_protocol_metadata_internal_block_invoke [C8] Client called nw_connection_copy_protocol_metadata_internal on unconnected nw_connection
-nw_connection_copy_protocol_metadata_internal_block_invoke [C8] Client called nw_connection_copy_protocol_metadata_internal on unconnected nw_connection
-nw_connection_copy_connected_local_endpoint_block_invoke [C8] Client called nw_connection_copy_connected_local_endpoint on unconnected nw_connection
-nw_connection_copy_connected_remote_endpoint_block_invoke [C8] Client called nw_connection_copy_connected_remote_endpoint on unconnected nw_connection
-Task <2BF2306D-9D5C-4014-8424-C55A42929FB1>.<13> HTTP load failed, 0/0 bytes (error code: -1004 [1:61])
-Task <2BF2306D-9D5C-4014-8424-C55A42929FB1>.<13> finished with error [-1004] Error Domain=NSURLErrorDomain Code=-1004 "Could not connect to the server." UserInfo={_kCFStreamErrorCodeKey=61, NSUnderlyingError=0x9b32932a0 {Error Domain=kCFErrorDomainCFNetwork Code=-1004 "(null)" UserInfo={_NSURLErrorNWPathKey=satisfied (Path is satisfied), viable, interface: lo0, _kCFStreamErrorCodeKey=61, _kCFStreamErrorDomainKey=1}}, _NSURLErrorFailingURLSessionTaskErrorKey=LocalDataTask <2BF2306D-9D5C-4014-8424-C55A42929FB1>.<13>, _NSURLErrorRelatedURLSessionTaskErrorKey=(
-    "LocalDataTask <2BF2306D-9D5C-4014-8424-C55A42929FB1>.<13>"
-), NSLocalizedDescription=Could not connect to the server., NSErrorFailingURLStringKey=http://127.0.0.1:8642/health, NSErrorFailingURLKey=http://127.0.0.1:8642/health, _kCFStreamErrorDomainKey=1}
+[AppDelegate] updateConsoleKeyState: mainWindow.isKeyWindow=false, onboardingWindow.isKeyWindow=false, isConsoleKeyWindow=false
+[AppDelegate] updateConsoleKeyState: mainWindow.isKeyWindow=true, onboardingWindow.isKeyWindow=false, isConsoleKeyWindow=true
+[2026-07-20 13:51:47.077] [ERROR] [AgentService] [AgentService] CLI failed (2): usage: hermes [-h] [--version] [-z PROMPT] [--usage-file PATH] [-m MODEL]
+              [--provider PROVIDER] [-t TOOLSETS] [--resume SESSION]
+              [--no-restore-cwd] [--continue [SESSION_NAME]] [--worktree]
+              [--accept-hooks] [--skills SKILLS] [--yolo] [--pass-session-id]
+              [--ignore-user-config] [--ignore-rules] [--safe-mode] [--tui]
+              [--cli] [--dev]
+              {chat,model,moa,fallback,secrets,migrate,gateway,proxy,lsp,setup,postinstall,whatsapp,whatsapp-cloud,slack,send,login,logout,auth,status,cron,webhook,portal,kanban,project,hooks,doctor,security,dump,debug,backup,checkpoints,import,config,console,pairing,skills,bundles,plugins,curator,pets,journey,learning,memory-graph,memory,tools,computer-use,mcp,sessions,insights,claw,version,update,uninstall,acp,profile,completion,dashboard,serve,desktop,gui,logs,prompt-size}
+              ...
+hermes: error: argument command: invalid choice: 'list' (choose from 'chat', 'model', 'moa', 'fallback', 'secrets', 'migrate', 'gateway', 'proxy', 'lsp', 'setup', 'postinstall', 'whatsapp', 'whatsapp-cloud', 'slack', 'send', 'login', 'logout', 'auth', 'status', 'cron', 'webhook', 'portal', 'kanban', 'project', 'hooks', 'doctor', 'security', 'dump', 'debug', 'backup', 'checkpoints', 'import', 'config', 'console', 'pairing', 'skills', 'bundles', 'plugins', 'curator', 'pets', 'journey', 'learning', 'memory-graph', 'memory', 'tools', 'computer-use', 'mcp', 'sessions', 'insights', 'claw', 'version', 'update', 'uninstall', 'acp', 'profile', 'completion', 'dashboard', 'serve', 'desktop', 'gui', 'logs', 'prompt-size')
+  ← AgentService.swift:357
+[2026-07-20 13:51:47.077] [ERROR] [AgentService] [AgentService] CLI failed (2): usage: hermes [-h] [--version] [-z PROMPT] [--usage-file PATH] [-m MODEL]
+              [--provider PROVIDER] [-t TOOLSETS] [--resume SESSION]
+              [--no-restore-cwd] [--continue [SESSION_NAME]] [--worktree]
+              [--accept-hooks] [--skills SKILLS] [--yolo] [--pass-session-id]
+              [--ignore-user-config] [--ignore-rules] [--safe-mode] [--tui]
+              [--cli] [--dev]
+              {chat,model,moa,fallback,secrets,migrate,gateway,proxy,lsp,setup,postinstall,whatsapp,whatsapp-cloud,slack,send,login,logout,auth,status,cron,webhook,portal,kanban,project,hooks,doctor,security,dump,debug,backup,checkpoints,import,config,console,pairing,skills,bundles,plugins,curator,pets,journey,learning,memory-graph,memory,tools,computer-use,mcp,sessions,insights,claw,version,update,uninstall,acp,profile,completion,dashboard,serve,desktop,gui,logs,prompt-size}
+              ...
+hermes: error: argument command: invalid choice: 'list' (choose from 'chat', 'model', 'moa', 'fallback', 'secrets', 'migrate', 'gateway', 'proxy', 'lsp', 'setup', 'postinstall', 'whatsapp', 'whatsapp-cloud', 'slack', 'send', 'login', 'logout', 'auth', 'status', 'cron', 'webhook', 'portal', 'kanban', 'project', 'hooks', 'doctor', 'security', 'dump', 'debug', 'backup', 'checkpoints', 'import', 'config', 'console', 'pairing', 'skills', 'bundles', 'plugins', 'curator', 'pets', 'journey', 'learning', 'memory-graph', 'memory', 'tools', 'computer-use', 'mcp', 'sessions', 'insights', 'claw', 'version', 'update', 'uninstall', 'acp', 'profile', 'completion', 'dashboard', 'serve', 'desktop', 'gui', 'logs', 'prompt-size')
+  ← AgentService.swift:357
+[2026-07-20 13:51:47.080] [INFO] [AgentService] [AgentService] listProfiles Strategy3(FILESYSTEM) fallback  ← AgentService.swift:80
+[2026-07-20 13:51:47.080] [INFO] [AgentService] [AgentService] listProfiles Strategy3(FILESYSTEM) fallback  ← AgentService.swift:80
+[2026-07-20 13:51:47.081] [INFO] [AgentVM] [AgentVM] loadProfiles → 1 profiles  ← AgentViewModel.swift:75
+[2026-07-20 13:51:47.081] [INFO] [AgentVM] [AgentVM] loadProfiles → 1 profiles  ← AgentViewModel.swift:75
+[2026-07-20 13:51:47.082] [INFO] [AgentVM] [AgentVM] prepareChat → default  ← AgentViewModel.swift:148
+[2026-07-20 13:51:47.082] [INFO] [AgentVM] [AgentVM] prepareChat → default  ← AgentViewModel.swift:148
+[2026-07-20 13:51:47.185] [INFO] [HermesConfigWriter] readReasoningEffort: raw=medium -> medium  ← HermesConfigWriter.swift:459
+[2026-07-20 13:51:47.185] [INFO] [HermesConfigWriter] readReasoningEffort: raw=medium -> medium  ← HermesConfigWriter.swift:459
+[2026-07-20 13:51:47.188] [INFO] [AiChatVM] [AiChatVM] setupInitialConfigIfNeeded: reasoning=medium cwd=."  ← AiChatViewModel.swift:99
+[2026-07-20 13:51:47.188] [INFO] [AiChatVM] [AiChatVM] setupInitialConfigIfNeeded: reasoning=medium cwd=."  ← AiChatViewModel.swift:99
+[SessionListVM] loadSessions: 被调用，isLoading=false
+[2026-07-20 13:51:47.192] [INFO] [AiChatVM] loadWorkingDirectory: ."  ← AiChatViewModel.swift:944
+[2026-07-20 13:51:47.192] [INFO] [AiChatVM] loadWorkingDirectory: ."  ← AiChatViewModel.swift:944
+Modifying state during view update, this will cause undefined behavior.
+[AiChatPage] onAppear: 进入，hasLoadedSessions=false
+[SessionListVM] loadSessions: 被调用，isLoading=true
+[AiChatPage] onAppear: 退出
+[2026-07-20 13:51:47.788] [INFO] [SessionApiService] Session raw[0]: ["input_tokens": 14732, "title": <null>, "estimated_cost_usd": 0, "cache_read_tokens": 0, "has_system_prompt": 1, "parent_session_id": <null>, "user_id": <null>, "has_model_config": 1, "reasoning_tokens": 0, "model": moonshotai/Kimi-K2.7-Code, "output_tokens": 228, "preview": 哈喽哈喽哈喽哈喽 [screenshot], "end_reason": <null>, "last_active": 1784432842.380838, "ended_at": <null>, "cache_write_tokens": 0, "api_call_count": 1, "id": api-9e633777eca10293, "message_count": 2, "started_at": 1784432723.645608, "actual_cost_usd": <null>, "tool_call_count": 0, "source": api_server]  ← SessionApiService.swift:27
+[2026-07-20 13:51:47.788] [INFO] [SessionApiService] Session raw[0]: ["input_tokens": 14732, "title": <null>, "estimated_cost_usd": 0, "cache_read_tokens": 0, "has_system_prompt": 1, "parent_session_id": <null>, "user_id": <null>, "has_model_config": 1, "reasoning_tokens": 0, "model": moonshotai/Kimi-K2.7-Code, "output_tokens": 228, "preview": 哈喽哈喽哈喽哈喽 [screenshot], "end_reason": <null>, "last_active": 1784432842.380838, "ended_at": <null>, "cache_write_tokens": 0, "api_call_count": 1, "id": api-9e633777eca10293, "message_count": 2, "started_at": 1784432723.645608, "actual_cost_usd": <null>, "tool_call_count": 0, "source": api_server]  ← SessionApiService.swift:27
+[2026-07-20 13:51:47.788] [INFO] [SessionApiService] Fetched 1 sessions from API  ← SessionApiService.swift:34
+[2026-07-20 13:51:47.788] [INFO] [SessionApiService] Fetched 1 sessions from API  ← SessionApiService.swift:34
+[2026-07-20 13:51:47.788] [INFO] [SessionListVM] SessionListVM session api-9e633777eca10293: title=<null>, preview=哈喽哈喽哈喽哈喽 [screenshot], assistantPreview=  ← SessionListViewModel.swift:38
+[2026-07-20 13:51:47.788] [INFO] [SessionListVM] SessionListVM session api-9e633777eca10293: title=<null>, preview=哈喽哈喽哈喽哈喽 [screenshot], assistantPreview=  ← SessionListViewModel.swift:38
+[2026-07-20 13:51:47.789] [INFO] [SessionListVM] SessionListVM: loaded 1 sessions  ← SessionListViewModel.swift:50
+[2026-07-20 13:51:47.789] [INFO] [SessionListVM] SessionListVM: loaded 1 sessions  ← SessionListViewModel.swift:50
+Modifying state during view update, this will cause undefined behavior.
+[2026-07-20 13:51:47.943] [INFO] [ModelConfigService] parseModelSection: provider=custom, default=moonshotai/Kimi-K2.7-Code, displayName=Kimi-K2.7-Code  ← ModelConfigService.swift:156
+[2026-07-20 13:51:47.943] [INFO] [ModelConfigService] parseModelSection: provider=custom, default=moonshotai/Kimi-K2.7-Code, displayName=Kimi-K2.7-Code  ← ModelConfigService.swift:156
+[2026-07-20 13:51:47.948] [INFO] [ModelConfigService] parseModelSection: provider=custom, default=moonshotai/Kimi-K2.7-Code, displayName=Kimi-K2.7-Code  ← ModelConfigService.swift:156
+[2026-07-20 13:51:47.948] [INFO] [ModelConfigService] parseModelSection: provider=custom, default=moonshotai/Kimi-K2.7-Code, displayName=Kimi-K2.7-Code  ← ModelConfigService.swift:156
+[2026-07-20 13:51:48.157] [INFO] [AiChatVM] setupInitialConfigIfNeeded: currentModel=moonshotai/Kimi-K2.7-Code  ← AiChatViewModel.swift:109
+[2026-07-20 13:51:48.157] [INFO] [AiChatVM] setupInitialConfigIfNeeded: currentModel=moonshotai/Kimi-K2.7-Code  ← AiChatViewModel.swift:109
+[2026-07-20 13:51:48.157] [INFO] [AiChatVM] loadCurrentModel: currentModel=moonshotai/Kimi-K2.7-Code  ← AiChatViewModel.swift:909
+[2026-07-20 13:51:48.157] [INFO] [AiChatVM] loadCurrentModel: currentModel=moonshotai/Kimi-K2.7-Code  ← AiChatViewModel.swift:909
+Modifying state during view update, this will cause undefined behavior.
+[AppDelegate] updateConsoleKeyState: mainWindow.isKeyWindow=false, onboardingWindow.isKeyWindow=false, isConsoleKeyWindow=false
+[AppDelegate] updateConsoleKeyState: mainWindow.isKeyWindow=false, onboardingWindow.isKeyWindow=false, isConsoleKeyWindow=false
+ViewBridge to RemoteViewService Terminated: Error Domain=com.apple.ViewBridge Code=18 "(null)" UserInfo={com.apple.ViewBridge.error.hint=this process disconnected remote view controller -- benign unless unexpected, com.apple.ViewBridge.error.description=NSViewBridgeErrorCanceled}
+cannot open file at line 51044 of [f0ca7bba1c]
+os_unix.c:51044: (2) open(/private/var/db/DetachedSignatures) - No such file or directory
+*** -[NSXPCDecoder validateAllowedClass:forKey:]: NSSecureCoding allowed classes list contains [NSObject class], which bypasses security by allowing any Objective-C class to be implicitly decoded. Consider reducing the scope of allowed classes during decoding by listing only the classes you expect to decode, or a more specific base class than NSObject. This will become an error in the future. Allowed class list: {(
+    "'NSObject' (0x1fbdb2d58) [/usr/lib]"
+)}<decode: bad range for [%{public}@] got [offs:287 len:1393 within:0]>
+[2026-07-20 13:52:14.097] [INFO] [AgentVM] [AgentVM] createProfile pe mode=clone modelSetup=custom  ← AgentViewModel.swift:196
+[2026-07-20 13:52:14.097] [INFO] [AgentVM] [AgentVM] createProfile pe mode=clone modelSetup=custom  ← AgentViewModel.swift:196
+[2026-07-20 13:52:14.098] [INFO] [AgentService] [AgentService] createProfile name=pe mode=clone desc=编写产品文档 cloneFrom=  ← AgentService.swift:117
+[2026-07-20 13:52:14.098] [INFO] [AgentService] [AgentService] createProfile name=pe mode=clone desc=编写产品文档 cloneFrom=  ← AgentService.swift:117
+[2026-07-20 13:53:16.529] [INFO] [AgentService] [AgentService] createProfile pe → OK  ← AgentService.swift:157
+[2026-07-20 13:53:16.529] [INFO] [AgentService] [AgentService] createProfile pe → OK  ← AgentService.swift:157
+[2026-07-20 13:53:16.531] [INFO] [AgentVM] [AgentVM] loadProfiles(showLoading=true) START  ← AgentViewModel.swift:60
+[2026-07-20 13:53:16.531] [INFO] [AgentVM] [AgentVM] loadProfiles(showLoading=true) START  ← AgentViewModel.swift:60
+[2026-07-20 13:53:16.531] [INFO] [AgentService] [AgentService] listProfiles START  ← AgentService.swift:53
+[2026-07-20 13:53:16.531] [INFO] [AgentService] [AgentService] listProfiles START  ← AgentService.swift:53
+[2026-07-20 13:53:31.702] [ERROR] [AgentService] [AgentService] CLI failed (2): usage: hermes [-h] [--version] [-z PROMPT] [--usage-file PATH] [-m MODEL]
+              [--provider PROVIDER] [-t TOOLSETS] [--resume SESSION]
+              [--no-restore-cwd] [--continue [SESSION_NAME]] [--worktree]
+              [--accept-hooks] [--skills SKILLS] [--yolo] [--pass-session-id]
+              [--ignore-user-config] [--ignore-rules] [--safe-mode] [--tui]
+              [--cli] [--dev]
+              {chat,model,moa,fallback,secrets,migrate,gateway,proxy,lsp,setup,postinstall,whatsapp,whatsapp-cloud,slack,send,login,logout,auth,status,cron,webhook,portal,kanban,project,hooks,doctor,security,dump,debug,backup,checkpoints,import,config,console,pairing,skills,bundles,plugins,curator,pets,journey,learning,memory-graph,memory,tools,computer-use,mcp,sessions,insights,claw,version,update,uninstall,acp,profile,completion,dashboard,serve,desktop,gui,logs,prompt-size}
+              ...
+hermes: error: argument command: invalid choice: 'list' (choose from 'chat', 'model', 'moa', 'fallback', 'secrets', 'migrate', 'gateway', 'proxy', 'lsp', 'setup', 'postinstall', 'whatsapp', 'whatsapp-cloud', 'slack', 'send', 'login', 'logout', 'auth', 'status', 'cron', 'webhook', 'portal', 'kanban', 'project', 'hooks', 'doctor', 'security', 'dump', 'debug', 'backup', 'checkpoints', 'import', 'config', 'console', 'pairing', 'skills', 'bundles', 'plugins', 'curator', 'pets', 'journey', 'learning', 'memory-graph', 'memory', 'tools', 'computer-use', 'mcp', 'sessions', 'insights', 'claw', 'version', 'update', 'uninstall', 'acp', 'profile', 'completion', 'dashboard', 'serve', 'desktop', 'gui', 'logs', 'prompt-size')
+  ← AgentService.swift:357
+[2026-07-20 13:53:31.702] [ERROR] [AgentService] [AgentService] CLI failed (2): usage: hermes [-h] [--version] [-z PROMPT] [--usage-file PATH] [-m MODEL]
+              [--provider PROVIDER] [-t TOOLSETS] [--resume SESSION]
+              [--no-restore-cwd] [--continue [SESSION_NAME]] [--worktree]
+              [--accept-hooks] [--skills SKILLS] [--yolo] [--pass-session-id]
+              [--ignore-user-config] [--ignore-rules] [--safe-mode] [--tui]
+              [--cli] [--dev]
+              {chat,model,moa,fallback,secrets,migrate,gateway,proxy,lsp,setup,postinstall,whatsapp,whatsapp-cloud,slack,send,login,logout,auth,status,cron,webhook,portal,kanban,project,hooks,doctor,security,dump,debug,backup,checkpoints,import,config,console,pairing,skills,bundles,plugins,curator,pets,journey,learning,memory-graph,memory,tools,computer-use,mcp,sessions,insights,claw,version,update,uninstall,acp,profile,completion,dashboard,serve,desktop,gui,logs,prompt-size}
+              ...
+hermes: error: argument command: invalid choice: 'list' (choose from 'chat', 'model', 'moa', 'fallback', 'secrets', 'migrate', 'gateway', 'proxy', 'lsp', 'setup', 'postinstall', 'whatsapp', 'whatsapp-cloud', 'slack', 'send', 'login', 'logout', 'auth', 'status', 'cron', 'webhook', 'portal', 'kanban', 'project', 'hooks', 'doctor', 'security', 'dump', 'debug', 'backup', 'checkpoints', 'import', 'config', 'console', 'pairing', 'skills', 'bundles', 'plugins', 'curator', 'pets', 'journey', 'learning', 'memory-graph', 'memory', 'tools', 'computer-use', 'mcp', 'sessions', 'insights', 'claw', 'version', 'update', 'uninstall', 'acp', 'profile', 'completion', 'dashboard', 'serve', 'desktop', 'gui', 'logs', 'prompt-size')
+  ← AgentService.swift:357
+[AppDelegate] updateConsoleKeyState: mainWindow.isKeyWindow=false, onboardingWindow.isKeyWindow=false, isConsoleKeyWindow=false
+*** -[NSXPCDecoder validateAllowedClass:forKey:]: NSSecureCoding allowed classes list contains [NSObject class], which bypasses security by allowing any Objective-C class to be implicitly decoded. Consider reducing the scope of allowed classes during decoding by listing only the classes you expect to decode, or a more specific base class than NSObject. This will become an error in the future. Allowed class list: {(
+    "'NSObject' (0x1fbdb2d58) [/usr/lib]"
+)}<decode: bad range for [%{public}@] got [offs:287 len:1393 within:0]>
+[AppDelegate] handleAppDidBecomeActive
+[AppDelegate] updateConsoleKeyState: mainWindow.isKeyWindow=false, onboardingWindow.isKeyWindow=false, isConsoleKeyWindow=false
+[AppDelegate] updateConsoleKeyState: mainWindow.isKeyWindow=false, onboardingWindow.isKeyWindow=false, isConsoleKeyWindow=false
+[2026-07-20 13:53:47.527] [ERROR] [AgentService] [AgentService] CLI failed (2): usage: hermes [-h] [--version] [-z PROMPT] [--usage-file PATH] [-m MODEL]
+              [--provider PROVIDER] [-t TOOLSETS] [--resume SESSION]
+              [--no-restore-cwd] [--continue [SESSION_NAME]] [--worktree]
+              [--accept-hooks] [--skills SKILLS] [--yolo] [--pass-session-id]
+              [--ignore-user-config] [--ignore-rules] [--safe-mode] [--tui]
+              [--cli] [--dev]
+              {chat,model,moa,fallback,secrets,migrate,gateway,proxy,lsp,setup,postinstall,whatsapp,whatsapp-cloud,slack,send,login,logout,auth,status,cron,webhook,portal,kanban,project,hooks,doctor,security,dump,debug,backup,checkpoints,import,config,console,pairing,skills,bundles,plugins,curator,pets,journey,learning,memory-graph,memory,tools,computer-use,mcp,sessions,insights,claw,version,update,uninstall,acp,profile,completion,dashboard,serve,desktop,gui,logs,prompt-size}
+              ...
+hermes: error: argument command: invalid choice: 'list' (choose from 'chat', 'model', 'moa', 'fallback', 'secrets', 'migrate', 'gateway', 'proxy', 'lsp', 'setup', 'postinstall', 'whatsapp', 'whatsapp-cloud', 'slack', 'send', 'login', 'logout', 'auth', 'status', 'cron', 'webhook', 'portal', 'kanban', 'project', 'hooks', 'doctor', 'security', 'dump', 'debug', 'backup', 'checkpoints', 'import', 'config', 'console', 'pairing', 'skills', 'bundles', 'plugins', 'curator', 'pets', 'journey', 'learning', 'memory-graph', 'memory', 'tools', 'computer-use', 'mcp', 'sessions', 'insights', 'claw', 'version', 'update', 'uninstall', 'acp', 'profile', 'completion', 'dashboard', 'serve', 'desktop', 'gui', 'logs', 'prompt-size')
+  ← AgentService.swift:357
+[2026-07-20 13:53:47.527] [ERROR] [AgentService] [AgentService] CLI failed (2): usage: hermes [-h] [--version] [-z PROMPT] [--usage-file PATH] [-m MODEL]
+              [--provider PROVIDER] [-t TOOLSETS] [--resume SESSION]
+              [--no-restore-cwd] [--continue [SESSION_NAME]] [--worktree]
+              [--accept-hooks] [--skills SKILLS] [--yolo] [--pass-session-id]
+              [--ignore-user-config] [--ignore-rules] [--safe-mode] [--tui]
+              [--cli] [--dev]
+              {chat,model,moa,fallback,secrets,migrate,gateway,proxy,lsp,setup,postinstall,whatsapp,whatsapp-cloud,slack,send,login,logout,auth,status,cron,webhook,portal,kanban,project,hooks,doctor,security,dump,debug,backup,checkpoints,import,config,console,pairing,skills,bundles,plugins,curator,pets,journey,learning,memory-graph,memory,tools,computer-use,mcp,sessions,insights,claw,version,update,uninstall,acp,profile,completion,dashboard,serve,desktop,gui,logs,prompt-size}
+              ...
+hermes: error: argument command: invalid choice: 'list' (choose from 'chat', 'model', 'moa', 'fallback', 'secrets', 'migrate', 'gateway', 'proxy', 'lsp', 'setup', 'postinstall', 'whatsapp', 'whatsapp-cloud', 'slack', 'send', 'login', 'logout', 'auth', 'status', 'cron', 'webhook', 'portal', 'kanban', 'project', 'hooks', 'doctor', 'security', 'dump', 'debug', 'backup', 'checkpoints', 'import', 'config', 'console', 'pairing', 'skills', 'bundles', 'plugins', 'curator', 'pets', 'journey', 'learning', 'memory-graph', 'memory', 'tools', 'computer-use', 'mcp', 'sessions', 'insights', 'claw', 'version', 'update', 'uninstall', 'acp', 'profile', 'completion', 'dashboard', 'serve', 'desktop', 'gui', 'logs', 'prompt-size')
+  ← AgentService.swift:357
+[2026-07-20 13:53:47.530] [INFO] [AgentService] [AgentService] listProfiles Strategy3(FILESYSTEM) fallback  ← AgentService.swift:80
+[2026-07-20 13:53:47.530] [INFO] [AgentService] [AgentService] listProfiles Strategy3(FILESYSTEM) fallback  ← AgentService.swift:80
+[2026-07-20 13:53:47.533] [INFO] [AgentVM] [AgentVM] loadProfiles → 2 profiles  ← AgentViewModel.swift:75
+[2026-07-20 13:53:47.533] [INFO] [AgentVM] [AgentVM] loadProfiles → 2 profiles  ← AgentViewModel.swift:75
+[2026-07-20 13:53:47.534] [INFO] [AgentVM] [AgentVM] selectProfile → pe  ← AgentViewModel.swift:136
+[2026-07-20 13:53:47.534] [INFO] [AgentVM] [AgentVM] selectProfile → pe  ← AgentViewModel.swift:136
+[2026-07-20 13:53:47.534] [INFO] [AgentVM] [AgentVM] prepareChat → pe  ← AgentViewModel.swift:148
+[2026-07-20 13:53:47.534] [INFO] [AgentVM] [AgentVM] prepareChat → pe  ← AgentViewModel.swift:148
+Modifying state during view update, this will cause undefined behavior.
+[HermesGateway] startGatewayInternal: profile=pe hermesHome=/Users/mac002/.hermes/profiles/pe
+[HermesGateway] startGatewayInternal: pythonPath=/Users/mac002/.hermes/profiles/pe/hermes-agent/venv/bin/python
+[HermesGateway] startGatewayInternal: pythonPath 存在=false
+[HermesGateway] startGatewayInternal: 系统 python 查找结果=/usr/bin/python3
+[HermesGateway] startGatewayInternal: Python 路径不存在: /Users/mac002/.hermes/profiles/pe/hermes-agent/venv/bin/python
+[AppDelegate] updateConsoleKeyState: mainWindow.isKeyWindow=false, onboardingWindow.isKeyWindow=false, isConsoleKeyWindow=false
+[AppDelegate] updateConsoleKeyState: mainWindow.isKeyWindow=true, onboardingWindow.isKeyWindow=false, isConsoleKeyWindow=true
+*** -[NSXPCDecoder validateAllowedClass:forKey:]: NSSecureCoding allowed classes list contains [NSObject class], which bypasses security by allowing any Objective-C class to be implicitly decoded. Consider reducing the scope of allowed classes during decoding by listing only the classes you expect to decode, or a more specific base class than NSObject. This will become an error in the future. Allowed class list: {(
+    "'NSObject' (0x1fbdb2d58) [/usr/lib]"
+)}<decode: bad range for [%{public}@] got [offs:287 len:1393 within:0]>
 [AppDelegate] updateConsoleKeyState: mainWindow.isKeyWindow=false, onboardingWindow.isKeyWindow=false, isConsoleKeyWindow=false

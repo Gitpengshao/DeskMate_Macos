@@ -53,17 +53,29 @@ nonisolated final class MemoryFileStore {
     }
 
     /// 读取 SOUL.md 完整内容（单文件，不按 § 分隔）。
-    func readSoulFile() throws -> String {
-        let url = try resolveSoulFileURL()
-        guard FileManager.default.fileExists(atPath: url.path) else {
+    /// - Parameter profile: 目标 profile id；nil / "default" 表示默认 profile（`~/.hermes`）。
+    func readSoulFile(profile: String? = nil) throws -> String {
+        let url = try resolveSoulFileURL(profile: profile)
+        let exists = FileManager.default.fileExists(atPath: url.path)
+        DMLogger.log(
+            "[MemoryFileStore] readSoulFile profile=\(profile ?? "default") path=\(url.path) exists=\(exists)",
+            name: "MemoryFileStore"
+        )
+        guard exists else {
             return ""
         }
-        return try String(contentsOf: url, encoding: .utf8)
+        let content = try String(contentsOf: url, encoding: .utf8)
+        DMLogger.log(
+            "[MemoryFileStore] readSoulFile profile=\(profile ?? "default") contentLen=\(content.count)",
+            name: "MemoryFileStore"
+        )
+        return content
     }
 
     /// 写入 SOUL.md 完整内容。
-    func writeSoulFile(_ content: String) throws {
-        let url = try resolveSoulFileURL()
+    /// - Parameter profile: 目标 profile id；nil / "default" 表示默认 profile（`~/.hermes`）。
+    func writeSoulFile(_ content: String, profile: String? = nil) throws {
+        let url = try resolveSoulFileURL(profile: profile)
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
             if FileManager.default.fileExists(atPath: url.path) {
@@ -138,8 +150,9 @@ nonisolated final class MemoryFileStore {
     }
 
     /// 解析 SOUL.md 文件 URL，确保 `.hermes` 目录存在。
-    private func resolveSoulFileURL() throws -> URL {
-        let hermesHome = AppConstants.resolveHermesHome()
+    /// - Parameter profile: 目标 profile id；nil / "default" 表示默认 profile（`~/.hermes`）。
+    private func resolveSoulFileURL(profile: String? = nil) throws -> URL {
+        let hermesHome = AppConstants.resolveHermesHome(for: profile)
         let homeURL = URL(fileURLWithPath: hermesHome)
         if !FileManager.default.fileExists(atPath: homeURL.path) {
             try FileManager.default.createDirectory(

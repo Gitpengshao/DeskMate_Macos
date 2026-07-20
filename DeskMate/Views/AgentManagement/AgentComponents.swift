@@ -73,13 +73,30 @@ struct AgentProfileRow: View {
     let isSelected: Bool
     var onTap: () -> Void
     var onDescribe: (() -> Void)?
+    var onEditModel: (() -> Void)?
+    var onEditSoul: (() -> Void)?
+    var onEditSkills: (() -> Void)?
     var onRename: (() -> Void)?
     var onDelete: (() -> Void)?
 
     @State private var isHovered: Bool = false
 
     var body: some View {
-        Button(action: onTap) {
+        ZStack {
+            // 背景：行选择热区（避免与操作按钮嵌套 Button）
+            RoundedRectangle(cornerRadius: 8)
+                .fill(rowFill)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(
+                            isSelected ? AgentPalette.inverse.opacity(0.4) : Color.clear,
+                            lineWidth: 1
+                        )
+                )
+                .contentShape(Rectangle())
+                .onTapGesture { onTap() }
+
+            // 内容
             HStack(spacing: 10) {
                 AgentAvatar(
                     letter: profile.avatarLetter,
@@ -124,6 +141,15 @@ struct AgentProfileRow: View {
 
                 if isHovered {
                     HStack(spacing: 2) {
+                        if let onEditModel = onEditModel {
+                            rowActionButton(icon: "cpu", action: onEditModel)
+                        }
+                        if let onEditSoul = onEditSoul {
+                            rowActionButton(icon: "sparkles", action: onEditSoul)
+                        }
+                        if let onEditSkills = onEditSkills {
+                            rowActionButton(icon: "wand.and.stars", action: onEditSkills)
+                        }
                         if let onDescribe = onDescribe {
                             rowActionButton(icon: "text.bubble", action: onDescribe)
                         }
@@ -141,20 +167,7 @@ struct AgentProfileRow: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(rowFill)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(
-                        isSelected ? AgentPalette.inverse.opacity(0.4) : Color.clear,
-                        lineWidth: 1
-                    )
-            )
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
         .onHover { hovering in
             isHovered = hovering
             if hovering {
@@ -172,7 +185,13 @@ struct AgentProfileRow: View {
     }
 
     private func rowActionButton(icon: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        Button(action: {
+            DMLogger.log(
+                "[AgentProfileRow] actionButton icon=\(icon) profileId=\(profile.id)",
+                name: "AgentProfileRow"
+            )
+            action()
+        }) {
             Image(systemName: icon)
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundColor(AgentPalette.textMuted)

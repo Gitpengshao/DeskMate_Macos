@@ -217,19 +217,29 @@ final class HermesGatewayService {
                                       preferredPort: Int? = nil) async -> (port: Int, apiKey: String)? {
         let key = registryKey(for: profile)
         let hermesHome = AppConstants.resolveHermesHome(for: profile)
-        let pythonPath = hermesPython(hermesHome)
+        let targetPythonPath = hermesPython(hermesHome)
 
         NSLog("[HermesGateway] startGatewayInternal: profile=\(profile ?? "default") hermesHome=\(hermesHome)")
-        NSLog("[HermesGateway] startGatewayInternal: pythonPath=\(pythonPath)")
+        NSLog("[HermesGateway] startGatewayInternal: targetPythonPath=\(targetPythonPath)")
 
         let fm = FileManager.default
-        let pythonExists = fm.fileExists(atPath: pythonPath)
-        NSLog("[HermesGateway] startGatewayInternal: pythonPath 存在=\(pythonExists)")
-        if !pythonExists {
-            let whichResult = runShellSync("which python3 2>/dev/null || which python 2>/dev/null")
-            NSLog("[HermesGateway] startGatewayInternal: 系统 python 查找结果=\(whichResult)")
-            NSLog("[HermesGateway] startGatewayInternal: Python 路径不存在: \(pythonPath)")
-            return nil
+        var pythonPathToUse = targetPythonPath
+        let targetPythonExists = fm.fileExists(atPath: targetPythonPath)
+        NSLog("[HermesGateway] startGatewayInternal: targetPython 存在=\(targetPythonExists)")
+        if !targetPythonExists {
+            // 新 profile 没有独立的 venv，回退到 default profile 的 Python 来启动 gateway。
+            // HERMES_HOME 仍指向目标 profile，因此配置、记忆、会话彼此隔离。
+            let defaultHermesHome = AppConstants.resolveHermesHome(for: nil)
+            let defaultPythonPath = hermesPython(defaultHermesHome)
+            if fm.fileExists(atPath: defaultPythonPath) {
+                pythonPathToUse = defaultPythonPath
+                NSLog("[HermesGateway] startGatewayInternal: 回退到 default profile Python: \(defaultPythonPath)")
+            } else {
+                let whichResult = runShellSync("which python3 2>/dev/null || which python 2>/dev/null")
+                NSLog("[HermesGateway] startGatewayInternal: 系统 python 查找结果=\(whichResult)")
+                NSLog("[HermesGateway] startGatewayInternal: Python 路径不存在: \(targetPythonPath)")
+                return nil
+            }
         }
 
         // 端口决策：兼容调用指定了端口；未指定时 default 用 8642，其它动态扫描。
@@ -314,7 +324,7 @@ final class HermesGatewayService {
         environment["GATEWAY_ALLOW_ALL_USERS"] = "true"
 
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: pythonPath)
+        process.executableURL = URL(fileURLWithPath: pythonPathToUse)
         process.arguments = args
         process.currentDirectoryPath = hermesHome
         process.environment = environment

@@ -247,9 +247,26 @@ enum AgentCreateMode: String, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - Model Setup Mode
+
+/// 创建 profile 时的模型配置策略。
+enum AgentModelSetupMode: Equatable {
+    /// 跟随 default 智能体：复制默认 profile 的模型配置到新 profile。
+    case followDefault
+    /// 自定义模型：创建后弹出模型配置弹窗，由用户单独配置。
+    case custom
+
+    var systemImage: String {
+        switch self {
+        case .followDefault: return "arrow.down.doc"
+        case .custom:        return "cpu"
+        }
+    }
+}
+
 // MARK: - Page State Model
 
-/// 多智能体页面单一状态源 — 对齐 Flutter `AgentPageModel`。
+/// 多智能体页面单一状态源 — 对齐 Flutter `AgentPageModel`.
 struct AgentPageModel: Equatable {
 
     // MARK: - 列表

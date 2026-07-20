@@ -21,16 +21,19 @@ struct AgentPage: View {
 
     /// 使用共享 ViewModel，跨 tab 切换时保持同一个实例，
     /// 避免每次进入页面都重新走一次 loading。
-    @StateObject private var viewModel = AgentViewModel.shared
+    /// 注意：共享单例必须使用 @ObservedObject，而不是 @StateObject。
+    @ObservedObject private var viewModel = AgentViewModel.shared
 
     /// 对话框可见性
     @State private var showNewProfileDialog: Bool = false
-    @State private var showRenameDialog: Bool = false
-    @State private var showDeleteDialog: Bool = false
-    @State private var showDescribeDialog: Bool = false
 
-    /// 当前正在操作的 profile（用于行内编辑/删除，不依赖左侧选中态）。
-    @State private var dialogProfile: AgentProfile? = nil
+    /// 行内编辑弹窗直接绑定到对应 profile（避免 dialogProfile + showXxxDialog 双状态不同步）。
+    @State private var renameDialogProfile: AgentProfile? = nil
+    @State private var deleteDialogProfile: AgentProfile? = nil
+    @State private var describeDialogProfile: AgentProfile? = nil
+    @State private var modelDialogProfile: AgentProfile? = nil
+    @State private var soulDialogProfile: AgentProfile? = nil
+    @State private var skillsDialogProfile: AgentProfile? = nil
 
     // MARK: - Init
 
@@ -47,20 +50,35 @@ struct AgentPage: View {
         .sheet(isPresented: $showNewProfileDialog) {
             NewAgentProfileDialog(viewModel: viewModel)
         }
-        .sheet(isPresented: $showRenameDialog) {
-            if let p = dialogProfile {
-                RenameAgentProfileDialog(viewModel: viewModel, profile: p)
-            }
+        .sheet(item: $renameDialogProfile) { p in
+            RenameAgentProfileDialog(viewModel: viewModel, profile: p)
         }
-        .sheet(isPresented: $showDeleteDialog) {
-            if let p = dialogProfile {
-                DeleteAgentProfileDialog(viewModel: viewModel, profile: p)
-            }
+        .sheet(item: $deleteDialogProfile) { p in
+            DeleteAgentProfileDialog(viewModel: viewModel, profile: p)
         }
-        .sheet(isPresented: $showDescribeDialog) {
-            if let p = dialogProfile {
-                DescribeAgentProfileDialog(viewModel: viewModel, profile: p)
-            }
+        .sheet(item: $describeDialogProfile) { p in
+            DescribeAgentProfileDialog(viewModel: viewModel, profile: p)
+        }
+        .sheet(item: $modelDialogProfile) { p in
+            let _ = DMLogger.log(
+                "[AgentPage] sheet model profileId=\(p.id)",
+                name: "AgentPage"
+            )
+            EditAgentModelDialog(profile: p)
+        }
+        .sheet(item: $soulDialogProfile) { p in
+            let _ = DMLogger.log(
+                "[AgentPage] sheet soul profileId=\(p.id)",
+                name: "AgentPage"
+            )
+            EditAgentSoulDialog(viewModel: viewModel, profile: p)
+        }
+        .sheet(item: $skillsDialogProfile) { p in
+            let _ = DMLogger.log(
+                "[AgentPage] sheet skills profileId=\(p.id)",
+                name: "AgentPage"
+            )
+            EditAgentSkillsDialog(viewModel: viewModel, profile: p)
         }
         // ⌘R 刷新
         .background(
@@ -208,18 +226,33 @@ struct AgentPage: View {
                         AgentProfileRow(
                             profile: p,
                             isSelected: p.id == viewModel.model.selectedProfileId,
-                            onTap: { Task { await viewModel.selectProfile(p.id) } },
+                            onTap: {
+                                DMLogger.log("[AgentPage] row tap profileId=\(p.id)", name: "AgentPage")
+                                Task { await viewModel.selectProfile(p.id) }
+                            },
                             onDescribe: {
-                                dialogProfile = p
-                                showDescribeDialog = true
+                                logEditTap(p, kind: "describe")
+                                describeDialogProfile = p
+                            },
+                            onEditModel: {
+                                logEditTap(p, kind: "model")
+                                modelDialogProfile = p
+                            },
+                            onEditSoul: {
+                                logEditTap(p, kind: "soul")
+                                soulDialogProfile = p
+                            },
+                            onEditSkills: {
+                                logEditTap(p, kind: "skills")
+                                skillsDialogProfile = p
                             },
                             onRename: {
-                                dialogProfile = p
-                                showRenameDialog = true
+                                logEditTap(p, kind: "rename")
+                                renameDialogProfile = p
                             },
                             onDelete: {
-                                dialogProfile = p
-                                showDeleteDialog = true
+                                logEditTap(p, kind: "delete")
+                                deleteDialogProfile = p
                             }
                         )
                     }
@@ -287,6 +320,15 @@ struct AgentPage: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AgentPalette.bgBase)
+    }
+
+    private func logEditTap(_ profile: AgentProfile, kind: String) {
+        DMLogger.log(
+            "[AgentPage] edit tap: kind=\(kind) profileId=\(profile.id) " +
+            "name=\(profile.name) descLen=\(profile.description.count) " +
+            "model=\(profile.model) isDefault=\(profile.isDefault)",
+            name: "AgentPage"
+        )
     }
 }
 

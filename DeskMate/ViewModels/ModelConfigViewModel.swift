@@ -19,6 +19,9 @@ final class ModelConfigViewModel: ObservableObject {
     /// 是否正在保存（用于对话框按钮的禁用态）。
     @Published var isSaving: Bool = false
 
+    /// 当前 writer 对应的 profile；`nil` 表示默认 profile（`~/.hermes`）。
+    let profile: String?
+
     private let configWriter: HermesConfigWriter
     private let gateway: HermesGatewayService
 
@@ -27,21 +30,21 @@ final class ModelConfigViewModel: ObservableObject {
     let gatewayStateChanged = PassthroughSubject<Void, Never>()
 
     init(
-        configWriter: HermesConfigWriter = .shared,
+        profile: String? = nil,
+        configWriter: HermesConfigWriter? = nil,
         gateway: HermesGatewayService
     ) {
-        self.configWriter = configWriter
+        let trimmed = profile?.trimmingCharacters(in: .whitespaces)
+        self.profile = (trimmed?.isEmpty == true) ? nil : trimmed
+        self.configWriter = configWriter ?? HermesConfigWriter.forProfile(self.profile)
         self.gateway = gateway
         self.model = ModelConfigModel()
     }
 
     /// 默认初始化器，使用全局 Gateway 单例。
     @MainActor
-    convenience init() {
-        self.init(
-            configWriter: .shared,
-            gateway: HermesGatewayService.shared
-        )
+    convenience init(profile: String? = nil) {
+        self.init(profile: profile, gateway: HermesGatewayService.shared)
     }
 
     // MARK: - Build (load from Hermes)
@@ -295,10 +298,10 @@ final class ModelConfigViewModel: ObservableObject {
     /// 使用 `stopAllGateways()` 而非 `stopGateway(for:)`，确保清理崩溃/未正常退出的
     /// 残留 Hermes Gateway 进程，避免 8642 端口被占用导致新实例启动失败。
     func restartGateway() async {
-        DMLogger.log("[ModelConfigVM] restartGateway 开始", name: "ModelConfigVM")
+        DMLogger.log("[ModelConfigVM] restartGateway 开始 profile=\(profile ?? "default")", name: "ModelConfigVM")
         await gateway.stopAllGateways()
         DMLogger.log("[ModelConfigVM] Gateway 已停止并清理残留进程", name: "ModelConfigVM")
-        let started = await gateway.startGateway()
+        let started = await gateway.restartGateway(for: profile) != nil
         DMLogger.log("[ModelConfigVM] Gateway 已启动 success=\(started)", name: "ModelConfigVM")
 
         // 刷新全局状态：网关连接徽标、AI 对话当前模型显示等。

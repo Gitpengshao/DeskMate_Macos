@@ -53,7 +53,7 @@ nonisolated final class AgentService {
         DMLogger.log("[AgentService] listProfiles START", name: "AgentService")
 
         // Strategy 1: --json
-        if let arr = await runProfileCli(args: ["list", "--json"], timeout: queryTimeout) as? [Any] {
+        if let arr = await runProfileCli(args: ["profile", "list", "--json"], timeout: queryTimeout) as? [Any] {
             let casted = arr.compactMap { $0 as? [String: Any] }
             if !casted.isEmpty {
                 DMLogger.log(
@@ -65,7 +65,7 @@ nonisolated final class AgentService {
         }
 
         // Strategy 2: 表格输出
-        if let table = await runProfileCli(args: ["list"], timeout: queryTimeout) as? String {
+        if let table = await runProfileCli(args: ["profile", "list"], timeout: queryTimeout) as? String {
             let parsed = parseProfileTable(table)
             if !parsed.isEmpty {
                 DMLogger.log(
@@ -127,7 +127,7 @@ nonisolated final class AgentService {
             return false
         }
 
-        var args: [String] = ["create", name]
+        var args: [String] = ["profile", "create", name]
 
         switch mode {
         case .blank:
@@ -167,7 +167,7 @@ nonisolated final class AgentService {
     @discardableResult
     func deleteProfile(name: String, autoConfirm: Bool = false) async -> Bool {
         DMLogger.log("[AgentService] deleteProfile \(name)", name: "AgentService")
-        var args: [String] = ["delete", name]
+        var args: [String] = ["profile", "delete", name]
         if autoConfirm { args.append("--yes") }
         return await runProfileCliBool(args: args, timeout: writeTimeout)
     }
@@ -183,7 +183,7 @@ nonisolated final class AgentService {
         )
         guard Self.validateProfileName(newName) else { return false }
         return await runProfileCliBool(
-            args: ["rename", oldName, newName],
+            args: ["profile", "rename", oldName, newName],
             timeout: writeTimeout
         )
     }
@@ -194,7 +194,7 @@ nonisolated final class AgentService {
     @discardableResult
     func useProfile(name: String) async -> Bool {
         DMLogger.log("[AgentService] useProfile \(name)", name: "AgentService")
-        return await runProfileCliBool(args: ["use", name], timeout: queryTimeout)
+        return await runProfileCliBool(args: ["profile", "use", name], timeout: queryTimeout)
     }
 
     // ---- Describe ----
@@ -207,7 +207,7 @@ nonisolated final class AgentService {
             name: "AgentService"
         )
         return await runProfileCliBool(
-            args: ["describe", name, description],
+            args: ["profile", "describe", name, description],
             timeout: writeTimeout
         )
     }
@@ -220,7 +220,7 @@ nonisolated final class AgentService {
     func exportProfile(name: String) async -> String? {
         DMLogger.log("[AgentService] exportProfile \(name)", name: "AgentService")
         let result = await runProfileCli(
-            args: ["export", name],
+            args: ["profile", "export", name],
             timeout: longTimeout
         )
         // `hermes profile export` 会输出 tarball 路径到 stdout。
@@ -243,7 +243,7 @@ nonisolated final class AgentService {
             name: "AgentService"
         )
         return await runProfileCliBool(
-            args: ["import", tarballPath],
+            args: ["profile", "import", tarballPath],
             timeout: longTimeout
         )
     }
@@ -262,7 +262,7 @@ nonisolated final class AgentService {
             "[AgentService] installDistribution source=\(source) name=\(name ?? "") alias=\(alias)",
             name: "AgentService"
         )
-        var args: [String] = ["install", source]
+        var args: [String] = ["profile", "install", source]
         if let n = name?.trimmingCharacters(in: .whitespaces), !n.isEmpty {
             args.append(contentsOf: ["--name", n])
         }
@@ -283,7 +283,7 @@ nonisolated final class AgentService {
             "[AgentService] updateDistribution \(name) forceConfig=\(forceConfig)",
             name: "AgentService"
         )
-        var args: [String] = ["update", name]
+        var args: [String] = ["profile", "update", name]
         if forceConfig { args.append("--force-config") }
         return await runProfileCliBool(args: args, timeout: longTimeout)
     }

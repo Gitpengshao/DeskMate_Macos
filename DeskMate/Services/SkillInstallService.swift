@@ -27,16 +27,19 @@ nonisolated final class SkillInstallService {
     /// - Parameters:
     ///   - category: 分类目录名（例如 "blockchain"）。
     ///   - skillId: 技能 id（例如 "solana"）。
+    ///   - profile: 目标 profile id；nil / "default" 表示默认 profile。
     /// - Returns: 是否安装成功（退出码 0）。
     @discardableResult
-    func install(category: String, skillId: String) async -> Bool {
+    func install(category: String, skillId: String, profile: String? = nil) async -> Bool {
         let identifier = "official/\(category)/\(skillId)"
+        let profileLabel = profile ?? "default"
         DMLogger.log(
-            "installSkill: identifier=\(identifier)",
+            "installSkill: identifier=\(identifier) profile=\(profileLabel)",
             name: "SkillInstallService"
         )
         let result = await runHermesSkills(
             args: ["install", identifier, "--yes"],
+            profile: profile,
             timeout: defaultTimeout
         )
         if !result.success {
@@ -47,7 +50,7 @@ nonisolated final class SkillInstallService {
             lastError = result.stderr.isEmpty ? result.stdout : result.stderr
         } else {
             DMLogger.log(
-                "installSkill: ok \(identifier)",
+                "installSkill: ok \(identifier) profile=\(profileLabel)",
                 name: "SkillInstallService"
             )
             lastError = nil
@@ -57,16 +60,20 @@ nonisolated final class SkillInstallService {
 
     /// 卸载一个技能。
     ///
-    /// - Parameter skillId: 技能 id。
+    /// - Parameters:
+    ///   - skillId: 技能 id。
+    ///   - profile: 目标 profile id；nil / "default" 表示默认 profile。
     /// - Returns: 是否卸载成功。
     @discardableResult
-    func uninstall(skillId: String) async -> Bool {
+    func uninstall(skillId: String, profile: String? = nil) async -> Bool {
+        let profileLabel = profile ?? "default"
         DMLogger.log(
-            "uninstallSkill: id=\(skillId)",
+            "uninstallSkill: id=\(skillId) profile=\(profileLabel)",
             name: "SkillInstallService"
         )
         let result = await runHermesSkills(
             args: ["uninstall", skillId],
+            profile: profile,
             timeout: 60
         )
         if !result.success {
@@ -77,7 +84,7 @@ nonisolated final class SkillInstallService {
             lastError = result.stderr.isEmpty ? result.stdout : result.stderr
         } else {
             DMLogger.log(
-                "uninstallSkill: ok \(skillId)",
+                "uninstallSkill: ok \(skillId) profile=\(profileLabel)",
                 name: "SkillInstallService"
             )
             lastError = nil
@@ -87,19 +94,29 @@ nonisolated final class SkillInstallService {
 
     // MARK: - Process
 
-    /// 在 hermes venv 下执行 `hermes skills <args>` 子进程。
-    private func runHermesSkills(args: [String], timeout: TimeInterval) async -> ShellResult {
+    /// 在 hermes venv 下执行 `hermes [-p <profile>] skills <args>` 子进程。
+    /// - Parameter profile: 目标 profile id；nil / "default" 表示默认 profile。
+    private func runHermesSkills(args: [String], profile: String?, timeout: TimeInterval) async -> ShellResult {
         let hermesHome = AppConstants.resolveHermesHome()
         let hermesBin = (hermesHome as NSString)
             .appendingPathComponent("hermes-agent/venv/bin/hermes")
         let fm = FileManager.default
+
+        let cliArgs: [String] = {
+            if let profile = profile?.trimmingCharacters(in: .whitespaces),
+               !profile.isEmpty, profile != "default" {
+                return ["-p", profile, "skills"] + args
+            }
+            return ["skills"] + args
+        }()
+
         if !fm.isExecutableFile(atPath: hermesBin) {
             // 兜底: 尝试调用 ~/.local/bin/hermes
             let fallback = "/Users/mac002/.local/bin/hermes"
             if fm.isExecutableFile(atPath: fallback) {
                 return await runProcess(
                     executable: fallback,
-                    args: ["skills"] + args,
+                    args: cliArgs,
                     timeout: timeout
                 )
             }
@@ -112,7 +129,7 @@ nonisolated final class SkillInstallService {
         }
         return await runProcess(
             executable: hermesBin,
-            args: ["skills"] + args,
+            args: cliArgs,
             timeout: timeout
         )
     }

@@ -73,6 +73,9 @@ enum AgentText {
     static let renameProfile   = "重命名"
     static let deleteProfile   = "删除"
     static let editDescription = "编辑描述"
+    static let editModel       = "编辑模型"
+    static let editSoul        = "编辑 SOUL.md"
+    static let editSkills      = "编辑技能"
     static let save            = "保存"
     static let cancel          = "取消"
     static let confirm         = "确认"
@@ -85,6 +88,9 @@ enum AgentText {
     static let cloneProfileTitle = "克隆 profile"
     static let renameTitle     = "重命名 profile"
     static let deleteTitle     = "删除 profile"
+    static let modelTitle      = "编辑主模型"
+    static let soulTitle       = "编辑 SOUL.md"
+    static let skillsTitle     = "编辑技能"
 
     // ---- Helpers ----
     static func notEmpty(_ s: String, fallback: String) -> String {

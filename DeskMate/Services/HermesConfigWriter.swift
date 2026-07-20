@@ -80,6 +80,10 @@ final class HermesConfigWriter {
     /// 读取 `config.yaml` 中 `model:` 块的当前主模型。
     func readModelConfig() -> CurrentModelConfig {
         let content = readFileOrEmpty(path: configPath)
+        DMLogger.log(
+            "[HermesConfigWriter] readModelConfig profile=\(profile ?? "default") configPath=\(configPath) contentLen=\(content.count)",
+            name: "HermesConfigWriter"
+        )
         guard !content.isEmpty else { return .empty }
         return parseModelBlock(content: content)
     }
