@@ -131,11 +131,36 @@ final class AgentViewModel: ObservableObject {
 
     // MARK: - Selection
 
-    /// 选中某个 profile 并确保其 Gateway / 聊天容器就绪。
-    func selectProfile(_ id: String) async {
-        DMLogger.log("[AgentVM] selectProfile → \(id)", name: "AgentVM")
+    /// 选中某个 profile。
+    /// 选中态立即同步更新；Gateway / 聊天容器的准备在后台 Task 中完成，
+    /// 右侧通过 `preparingProfileId` 显示加载状态，避免左侧 item 点击卡顿。
+    func selectProfile(_ id: String) {
+        let start = Date()
+        DMLogger.log(
+            "[AgentVM] selectProfile ENTER id=\(id) current=\(model.selectedProfileId) thread=\(Thread.current.isMainThread ? "main" : "bg")",
+            name: "AgentVM"
+        )
+        guard id != model.selectedProfileId else {
+            DMLogger.log("[AgentVM] selectProfile SKIP same id=\(id)", name: "AgentVM")
+            return
+        }
         model = model.updating(selectedProfileId: id)
-        await prepareChat(for: id)
+        DMLogger.log(
+            "[AgentVM] selectProfile UPDATED id=\(id) elapsed=\(String(format: "%.3f", Date().timeIntervalSince(start)))s",
+            name: "AgentVM"
+        )
+        Task { [weak self] in
+            DMLogger.log("[AgentVM] selectProfile Task START id=\(id)", name: "AgentVM")
+            await self?.prepareChat(for: id)
+            DMLogger.log(
+                "[AgentVM] selectProfile Task DONE id=\(id) elapsed=\(String(format: "%.3f", Date().timeIntervalSince(start)))s",
+                name: "AgentVM"
+            )
+        }
+        DMLogger.log(
+            "[AgentVM] selectProfile EXIT id=\(id) elapsed=\(String(format: "%.3f", Date().timeIntervalSince(start)))s",
+            name: "AgentVM"
+        )
     }
 
     /// 获取指定 profile 的聊天容器（若尚未创建则返回 nil）。
@@ -145,35 +170,67 @@ final class AgentViewModel: ObservableObject {
 
     /// 确保指定 profile 的 Gateway 正在运行，并创建/复用对应的聊天容器。
     func prepareChat(for profileId: String) async {
-        DMLogger.log("[AgentVM] prepareChat → \(profileId)", name: "AgentVM")
+        let start = Date()
+        DMLogger.log(
+            "[AgentVM] prepareChat ENTER id=\(profileId) thread=\(Thread.current.isMainThread ? "main" : "bg")",
+            name: "AgentVM"
+        )
 
         // 已存在容器时直接刷新状态，避免重复启动 Gateway / 重建 ViewModel。
         if let container = chatContainers[profileId] {
+            DMLogger.log("[AgentVM] prepareChat HIT container id=\(profileId)", name: "AgentVM")
             container.sessionVM.loadSessions()
             container.chatVM.loadCurrentModel()
             container.chatVM.loadWorkingDirectory()
+            DMLogger.log(
+                "[AgentVM] prepareChat HIT DONE id=\(profileId) elapsed=\(String(format: "%.3f", Date().timeIntervalSince(start)))s",
+                name: "AgentVM"
+            )
             return
         }
 
         preparingProfileId = profileId
-        defer { preparingProfileId = nil }
+        DMLogger.log("[AgentVM] prepareChat preparingProfileId SET id=\(profileId)", name: "AgentVM")
+        defer {
+            preparingProfileId = nil
+            DMLogger.log(
+                "[AgentVM] prepareChat preparingProfileId CLEARED id=\(profileId) elapsed=\(String(format: "%.3f", Date().timeIntervalSince(start)))s",
+                name: "AgentVM"
+            )
+        }
 
-        guard let (port, apiKey) = await HermesGatewayService.shared.ensureGatewayRunning(for: profileId) else {
+        DMLogger.log("[AgentVM] prepareChat ensureGatewayRunning START id=\(profileId)", name: "AgentVM")
+        let gatewayResult = await HermesGatewayService.shared.ensureGatewayRunning(for: profileId)
+        DMLogger.log(
+            "[AgentVM] prepareChat ensureGatewayRunning DONE id=\(profileId) success=\(gatewayResult != nil) elapsed=\(String(format: "%.3f", Date().timeIntervalSince(start)))s",
+            name: "AgentVM"
+        )
+        guard let (port, apiKey) = gatewayResult else {
             model = model.updating(
                 errorMessage: "无法启动 \(profileId.isEmpty ? "默认" : profileId) 智能体的 Gateway"
             )
             return
         }
 
-        let client = GatewayClient(host: "127.0.0.1", port: port, apiKey: apiKey)
-        let chatVM = AiChatViewModel(gateway: client, profile: profileId)
-        let sessionVM = SessionListViewModel(gateway: client, profile: profileId)
-        let container = AgentChatContainer(profileId: profileId, chatVM: chatVM, sessionVM: sessionVM)
-        chatContainers[profileId] = container
+        // 把创建 VM 与初始化数据刷新推到后台 Task，避免在主线程同步执行阻塞点击/高亮反馈。
+        Task { @MainActor [weak self] in
+            guard let self = self else { return }
+            DMLogger.log("[AgentVM] prepareChat create VMs id=\(profileId)", name: "AgentVM")
+            let client = GatewayClient(host: "127.0.0.1", port: port, apiKey: apiKey)
+            let chatVM = AiChatViewModel(gateway: client, profile: profileId)
+            let sessionVM = SessionListViewModel(gateway: client, profile: profileId)
+            let container = AgentChatContainer(profileId: profileId, chatVM: chatVM, sessionVM: sessionVM)
+            self.chatContainers[profileId] = container
+            DMLogger.log("[AgentVM] prepareChat container stored id=\(profileId)", name: "AgentVM")
 
-        container.sessionVM.loadSessions()
-        container.chatVM.loadCurrentModel()
-        container.chatVM.loadWorkingDirectory()
+            container.sessionVM.loadSessions()
+            container.chatVM.loadCurrentModel()
+            container.chatVM.loadWorkingDirectory()
+            DMLogger.log(
+                "[AgentVM] prepareChat EXIT id=\(profileId) elapsed=\(String(format: "%.3f", Date().timeIntervalSince(start)))s",
+                name: "AgentVM"
+            )
+        }
     }
 
     // MARK: - Search / Filter
@@ -218,7 +275,7 @@ final class AgentViewModel: ObservableObject {
             await loadProfiles()
             // 自动选中新创建的 profile 并启动其 Gateway
             if let new = model.profiles.first(where: { $0.id == name }) {
-                await selectProfile(new.id)
+                selectProfile(new.id)
             }
         } else {
             let detail = service.lastError?.isEmpty == false
@@ -264,7 +321,7 @@ final class AgentViewModel: ObservableObject {
                 let fallbackId = model.profiles.first?.id ?? ""
                 model = model.updating(selectedProfileId: fallbackId)
                 if !fallbackId.isEmpty {
-                    await selectProfile(fallbackId)
+                    selectProfile(fallbackId)
                 }
             }
         } else {
@@ -302,8 +359,8 @@ final class AgentViewModel: ObservableObject {
                 model = model.updating(selectedProfileId: newName)
             }
             await loadProfiles()
-            // 自动选中新名称的 profile 并启动 Gateway
-            await selectProfile(newName)
+            // 自动选中新名称的 profile 并启动其 Gateway
+            selectProfile(newName)
         } else {
             let detail = service.lastError?.isEmpty == false
                 ? service.lastError!

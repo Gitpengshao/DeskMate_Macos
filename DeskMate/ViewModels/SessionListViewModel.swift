@@ -27,11 +27,13 @@ final class SessionListViewModel: ObservableObject {
     func loadSessions() {
         NSLog("[SessionListVM] loadSessions: 被调用，isLoading=\(state.isLoading)")
         guard !state.isLoading else { return }
-        state.isLoading = true
-        state.errorMessage = nil
 
-        Task { [weak self] in
+        // 把状态修改推到下一帧，避免在 body 评估期间直接修改 @Published。
+        Task { @MainActor [weak self] in
             guard let self = self else { return }
+            self.state.isLoading = true
+            self.state.errorMessage = nil
+
             let sessions = await self.apiService.fetchSessions()
 
             for session in sessions {
@@ -44,16 +46,12 @@ final class SessionListViewModel: ObservableObject {
                 )
             }
 
-            // 使用 @MainActor Task 异步提交状态更新，避免在视图更新周期中触发 objectWillChange。
-            Task { @MainActor [weak self] in
-                guard let self = self else { return }
-                DMLogger.log(
-                    "SessionListVM: loaded \(sessions.count) sessions",
-                    name: "SessionListVM"
-                )
-                self.state.sessions = sessions
-                self.state.isLoading = false
-            }
+            DMLogger.log(
+                "SessionListVM: loaded \(sessions.count) sessions",
+                name: "SessionListVM"
+            )
+            self.state.sessions = sessions
+            self.state.isLoading = false
         }
     }
 

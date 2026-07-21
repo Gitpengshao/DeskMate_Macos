@@ -42,6 +42,10 @@ struct AgentPage: View {
     // MARK: - Body
 
     var body: some View {
+        let _ = DMLogger.log(
+            "[AgentPage] body selected=\(viewModel.model.selectedProfileId)",
+            name: "AgentPage"
+        )
         ZStack {
             mainContent
         }
@@ -209,6 +213,10 @@ struct AgentPage: View {
 
     @ViewBuilder
     private var profileList: some View {
+        let _ = DMLogger.log(
+            "[AgentPage] profileList body selected=\(viewModel.model.selectedProfileId)",
+            name: "AgentPage"
+        )
         if viewModel.model.filteredProfiles.isEmpty {
             VStack(spacing: 8) {
                 Image(systemName: "tray")
@@ -227,8 +235,16 @@ struct AgentPage: View {
                             profile: p,
                             isSelected: p.id == viewModel.model.selectedProfileId,
                             onTap: {
-                                DMLogger.log("[AgentPage] row tap profileId=\(p.id)", name: "AgentPage")
-                                Task { await viewModel.selectProfile(p.id) }
+                                let start = Date()
+                                DMLogger.log(
+                                    "[AgentPage] row tap START profileId=\(p.id) selected=\(viewModel.model.selectedProfileId)",
+                                    name: "AgentPage"
+                                )
+                                viewModel.selectProfile(p.id)
+                                DMLogger.log(
+                                    "[AgentPage] row tap DONE profileId=\(p.id) elapsed=\(String(format: "%.3f", Date().timeIntervalSince(start)))s",
+                                    name: "AgentPage"
+                                )
                             },
                             onDescribe: {
                                 logEditTap(p, kind: "describe")
@@ -268,6 +284,10 @@ struct AgentPage: View {
     @ViewBuilder
     private var chatPanel: some View {
         let profileId = viewModel.model.selectedProfileId
+        let _ = DMLogger.log(
+            "[AgentPage] chatPanel body selected=\(profileId) preparing=\(viewModel.preparingProfileId ?? "nil") container=\(viewModel.chatContainer(for: profileId) != nil ? "yes" : "no")",
+            name: "AgentPage"
+        )
         if !profileId.isEmpty {
             if viewModel.preparingProfileId == profileId {
                 preparingView(profileId: profileId)
@@ -306,7 +326,8 @@ struct AgentPage: View {
                 .font(.system(size: 13, weight: .medium))
                 .foregroundColor(AgentPalette.textPrimary)
             Button("重试") {
-                Task { await viewModel.selectProfile(profileId) }
+                DMLogger.log("[AgentPage] retry selectProfile=\(profileId)", name: "AgentPage")
+                viewModel.selectProfile(profileId)
             }
             .buttonStyle(.plain)
             .font(.system(size: 12, weight: .semibold))

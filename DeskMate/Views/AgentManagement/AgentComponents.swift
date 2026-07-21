@@ -83,7 +83,7 @@ struct AgentProfileRow: View {
 
     var body: some View {
         ZStack {
-            // 背景：行选择热区（避免与操作按钮嵌套 Button）
+            // 背景
             RoundedRectangle(cornerRadius: 8)
                 .fill(rowFill)
                 .overlay(
@@ -93,8 +93,6 @@ struct AgentProfileRow: View {
                             lineWidth: 1
                         )
                 )
-                .contentShape(Rectangle())
-                .onTapGesture { onTap() }
 
             // 内容
             HStack(spacing: 10) {
@@ -167,6 +165,15 @@ struct AgentProfileRow: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
+        }
+        // 整个 ZStack 可点击；Button 内部仍优先响应。
+        .contentShape(RoundedRectangle(cornerRadius: 8))
+        .onTapGesture {
+            DMLogger.log(
+                "[AgentProfileRow] onTapGesture profileId=\(profile.id)",
+                name: "AgentProfileRow"
+            )
+            onTap()
         }
         .onHover { hovering in
             isHovered = hovering

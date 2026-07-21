@@ -904,7 +904,9 @@ import Combine
             guard let self = self else { return }
             let info = await self.modelConfigService.readCurrentModel()
 
-            await MainActor.run {
+            // 用 Task { @MainActor } 推到下一帧，避免 MainActor.run 在视图更新周期中同步执行。
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
                 self.model.currentModel = info
                 DMLogger.log(
                     "loadCurrentModel: currentModel=\(info?.fullName ?? "nil")",
@@ -938,10 +940,14 @@ import Combine
     // MARK: - Working directory
 
     /// 从 `~/.hermes/config.yaml` 重新读取当前工作区目录并更新 UI。
+    /// 异步提交到下一帧，避免在视图更新周期中直接修改 @Published。
     func loadWorkingDirectory() {
-        let cwd = configWriter.readTerminalCwd()
-        model.workingDirectory = cwd
-        DMLogger.log("loadWorkingDirectory: \(cwd ?? "nil")", name: "AiChatVM")
+        Task { @MainActor [weak self] in
+            guard let self = self else { return }
+            let cwd = self.configWriter.readTerminalCwd()
+            self.model.workingDirectory = cwd
+            DMLogger.log("loadWorkingDirectory: \(cwd ?? "nil")", name: "AiChatVM")
+        }
     }
 
     /// 设置工作区目录 — 同步更新 `model.workingDirectory` 并写入 `~/.hermes/config.yaml` 的 `terminal.cwd`。
