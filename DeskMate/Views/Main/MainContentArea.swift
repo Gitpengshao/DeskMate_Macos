@@ -7,6 +7,7 @@ struct MainContentArea: View {
     var isDark: Bool
 
     @ObservedObject private var connection = GatewayConnectionManager.shared
+    @ObservedObject private var dashboardConnection = DashboardConnectionManager.shared
 
     // 使用全局共享实例，以便语音快捷键等模块在控制台未打开时也能操作聊天状态。
     // 共享单例不由视图拥有，使用 @ObservedObject 观察即可；@StateObject 包装已存在的
@@ -42,6 +43,10 @@ struct MainContentArea: View {
                         .opacity(0.95),
                     label: gatewayStatusLabel
                 )
+                PillBadge(
+                    icon: dashboardStatusIcon,
+                    label: dashboardStatusLabel
+                )
             }
         }
         .padding(.horizontal, 24)
@@ -68,6 +73,34 @@ struct MainContentArea: View {
         case .checking:     return Palette.textTertiary
         case .connected:    return Color(red: 0.30, green: 0.85, blue: 0.40)
         case .disconnected: return Color(red: 0.95, green: 0.30, blue: 0.30)
+        }
+    }
+
+    private var dashboardStatusLabel: String {
+        switch dashboardConnection.status {
+        case .checking:     return "Dashboard 启动中"
+        case .connected:    return "Dashboard 已连接"
+        case .disconnected: return "Dashboard 未连接"
+        }
+    }
+
+    @ViewBuilder
+    private var dashboardStatusIcon: some View {
+        switch dashboardConnection.status {
+        case .checking:
+            ProgressView()
+                .controlSize(.mini)
+                .colorScheme(.dark)
+                .scaleEffect(0.7)
+                .frame(width: 6, height: 6)
+        case .connected:
+            Circle()
+                .fill(Color(red: 0.30, green: 0.85, blue: 0.40))
+                .frame(width: 6, height: 6)
+        case .disconnected:
+            Circle()
+                .fill(Color(red: 0.95, green: 0.30, blue: 0.30))
+                .frame(width: 6, height: 6)
         }
     }
 

@@ -310,20 +310,39 @@ final class DynamicNotchManager: ObservableObject {
 
     /// 显示灵动岛（幂等：若实例已存在则恢复显示，不重复创建）
     func show() {
+        let start = Date()
+        NSLog("[DynamicNotchManager] show: 开始 ensureNotch，主线程=%@",
+              Thread.isMainThread ? "YES" : "NO")
         ensureNotch()
+        NSLog("[DynamicNotchManager] show: ensureNotch 返回，耗时 %.3fs，主线程=%@",
+              Date().timeIntervalSince(start), Thread.isMainThread ? "YES" : "NO")
         Task { [weak self] in
+            let compactStart = Date()
+            NSLog("[DynamicNotchManager] show: 开始 compact()，主线程=%@",
+                  Thread.isMainThread ? "YES" : "NO")
             await self?.currentNotch?.compact()
+            NSLog("[DynamicNotchManager] show: compact() 返回，耗时 %.3fs，主线程=%@",
+                  Date().timeIntervalSince(compactStart), Thread.isMainThread ? "YES" : "NO")
         }
     }
 
     /// 同步创建 / 复用灵动岛实例 — 抽出便于 startWorking() 等其它入口复用。
     private func ensureNotch() {
-        if currentNotch != nil { return }
+        let start = Date()
+        NSLog("[DynamicNotchManager] ensureNotch: 进入，currentNotch=%@，主线程=%@",
+              currentNotch == nil ? "nil" : "exists", Thread.isMainThread ? "YES" : "NO")
+        if currentNotch != nil {
+            NSLog("[DynamicNotchManager] ensureNotch: 已存在实例，直接返回，耗时 %.3fs",
+                  Date().timeIntervalSince(start))
+            return
+        }
 
         let content = DeskMateNotchContent(manager: self) { [weak self] in
             self?.handleClick()
         }
 
+        NSLog("[DynamicNotchManager] ensureNotch: 开始创建 DynamicNotch，主线程=%@",
+              Thread.isMainThread ? "YES" : "NO")
         let notch = DynamicNotch(
             hoverBehavior: .keepVisible,
             style: .auto,
@@ -350,6 +369,8 @@ final class DynamicNotchManager: ObservableObject {
             }
         )
         currentNotch = notch
+        NSLog("[DynamicNotchManager] ensureNotch: DynamicNotch 创建完成，耗时 %.3fs，主线程=%@",
+              Date().timeIntervalSince(start), Thread.isMainThread ? "YES" : "NO")
     }
 
     /// 进入工作态 — 展开灵动岛并切换到 work 动画视图。幂等。
@@ -358,7 +379,12 @@ final class DynamicNotchManager: ObservableObject {
         isWorking = true
         ensureNotch()
         Task { [weak self] in
+            let expandStart = Date()
+            NSLog("[DynamicNotchManager] startWorking: 开始 expand()，主线程=%@",
+                  Thread.isMainThread ? "YES" : "NO")
             await self?.currentNotch?.expand()
+            NSLog("[DynamicNotchManager] startWorking: expand() 返回，耗时 %.3fs，主线程=%@",
+                  Date().timeIntervalSince(expandStart), Thread.isMainThread ? "YES" : "NO")
         }
     }
 
@@ -367,7 +393,12 @@ final class DynamicNotchManager: ObservableObject {
         guard isWorking else { return }
         isWorking = false
         Task { [weak self] in
+            let compactStart = Date()
+            NSLog("[DynamicNotchManager] stopWorking: 开始 compact()，主线程=%@",
+                  Thread.isMainThread ? "YES" : "NO")
             await self?.currentNotch?.compact()
+            NSLog("[DynamicNotchManager] stopWorking: compact() 返回，耗时 %.3fs，主线程=%@",
+                  Date().timeIntervalSince(compactStart), Thread.isMainThread ? "YES" : "NO")
         }
     }
 

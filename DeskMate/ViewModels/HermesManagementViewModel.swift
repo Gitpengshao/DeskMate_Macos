@@ -179,7 +179,9 @@ final class HermesManagementViewModel: ObservableObject {
 
     /// 操作成功后重启 DeskMate。
     func restartApp() {
-        Self.relaunchApplication()
+        Task {
+            await Self.relaunchApplication()
+        }
     }
 
     // MARK: - Operation Orchestration
@@ -532,8 +534,13 @@ final class HermesManagementViewModel: ObservableObject {
 
     /// 重启 DeskMate 应用。
     ///
-    /// 使用单实例安全的方式：等待当前进程退出后再 `open`（不带 `-n`），避免多开。
-    private static func relaunchApplication() {
+    /// 使用单实例安全的方式：先同步停止 Hermes Gateway / Dashboard，等待当前进程退出后再
+    /// `open`（不带 `-n`），避免多开或残留子进程导致新实例卡死。
+    private static func relaunchApplication() async {
+        // 1. 先同步停止 Gateway 与 Dashboard，确保旧实例退出前子进程已被释放。
+        await HermesGatewayService.shared.stopAllGateways()
+        await HermesDashboardService.shared.stopDashboard()
+
         let bundlePath = Bundle.main.bundlePath
         let pid = ProcessInfo.processInfo.processIdentifier
         let script = """
@@ -544,8 +551,8 @@ final class HermesManagementViewModel: ObservableObject {
         task.arguments = ["-c", script]
         try? task.run()
 
-        DispatchQueue.main.async {
-            // 程序内部重启，跳过退出确认框但仍会执行 Gateway 清理。
+        await MainActor.run {
+            // 程序内部重启，跳过退出确认框；由于子进程已同步停止，此处不再依赖异步清理。
             AppDelegate.shouldSkipQuitConfirmation = true
             NSApplication.shared.terminate(nil)
         }

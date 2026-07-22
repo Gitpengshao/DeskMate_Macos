@@ -35,6 +35,7 @@ enum SMPalette {
     // ---- Status (保留少量状态色) ----
     static let statusInstalled     = Color(red: 0.086, green: 0.639, blue: 0.290)  // #16A34A
     static let statusInstalledBg   = Color(red: 0.086, green: 0.639, blue: 0.290).opacity(0.15)
+    static let statusError         = Color(red: 0.937, green: 0.267, blue: 0.267)  // #EF4444
 }
 
 // MARK: - Text copy
@@ -43,16 +44,14 @@ enum SMPalette {
 enum SMText {
     // Header
     static let pageTitle        = "技能管理"
-    static let pageSubtitle     = "管理 Hermes 内置技能与可选技能"
+    static let pageSubtitle     = "管理 Hermes 技能启用状态与创建自定义技能"
     static let browseRegistry   = "浏览技能市场"
-
-    // Tabs
-    static let tabBuiltIn     = "内置技能"
-    static let tabAvailable   = "可用技能"
+    static let createSkill      = "创建技能"
+    static let allCategories    = "全部"
 
     // Counts / footer
     static func installedCount(_ count: Int) -> String {
-        return "已安装 \(count)"
+        return "已启用 \(count)"
     }
     static func skillsPath(_ path: String) -> String {
         return "~/.hermes/skills/\(path)"
@@ -60,14 +59,17 @@ enum SMText {
 
     // States
     static let loading        = "加载技能中..."
-    static let emptyBuiltIn   = "暂无内置技能"
-    static let emptyAvailable = "暂无可用技能"
+    static let emptyAll       = "暂无技能"
 
     // Actions
-    static let actionRestore   = "Restore"
-    static let actionUninstall = "Uninstall"
-    static let actionInstall   = "Install"
+    static let actionEnable   = "启用"
+    static let actionDisable  = "禁用"
 
     // Status badge
-    static let badgeInstalled = "Installed"
+    static let badgeInstalled = "Enabled"
+    static let badgeDisabled  = "Disabled"
+
+    // Errors
+    static let errorPrefix    = "出错了："
 }
+

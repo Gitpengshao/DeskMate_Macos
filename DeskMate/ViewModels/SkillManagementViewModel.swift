@@ -2,10 +2,10 @@ import Foundation
 import AppKit
 import Combine
 
-/// 技能管理页 ViewModel — 一比一还原 Flutter `SkillManagementViewModel`。
+/// 技能管理页 ViewModel — 从 Dashboard API 获取技能并管理启用状态。
 ///
-/// MVVM 单一状态源：所有状态通过 `model: SkillManagementModel` 发布；
-/// View 通过 `@Published` 订阅更新。所有文件系统 I/O 均为异步。
+/// 数据来源：`GET /api/skills` / `PUT /api/skills/toggle`。
+/// 创建技能：按官方 `creating-skills` 指南在 `~/.hermes/skills/` 下写入 SKILL.md。
 @MainActor
 final class SkillManagementViewModel: ObservableObject {
 
@@ -15,227 +15,199 @@ final class SkillManagementViewModel: ObservableObject {
 
     // MARK: - Dependencies
 
-    private let scanner: SkillScannerService
-    private let installer: SkillInstallService
+    private let client: DashboardClient
+
+    // MARK: - Cache
+
+    /// 内存缓存，避免每次进入页面都重新拉取，提升 reopen/toggle 体验。
+    private static var cachedSkills: [SkillCategoryGroup]?
 
     // MARK: - Init
 
-    init(scanner: SkillScannerService = SkillScannerService(),
-         installer: SkillInstallService = .shared) {
-        self.scanner = scanner
-        self.installer = installer
-        // 启动时异步加载 — 对齐 Flutter `build()` 内的 `_loadSkills()` 行为
+    init(client: DashboardClient = .shared) {
+        self.client = client
         Task { [weak self] in
-            await self?.loadSkills()
+            await self?.setupInitialLoad()
+        }
+    }
+
+    private func setupInitialLoad() async {
+        if let cached = Self.cachedSkills, !cached.isEmpty {
+            model.skills = cached
+            model.isLoading = false
+            await refreshSkills()
+        } else {
+            await loadSkills()
         }
     }
 
     // MARK: - Loading
 
-    /// 扫描两个数据源并将结果归类:
-    /// - `~/.hermes/skills/` — 已安装技能,按 `.bundled_manifest` 区分内置/用户安装
-    /// - `~/.hermes/hermes-agent/optional-skills/` — 官方随包发布的可选技能目录
-    ///
-    /// 对齐 Flutter `_loadSkills`,并扩展以支持官方可选技能。
+    /// 从 Dashboard API 加载技能列表。
     func loadSkills() async {
-        DMLogger.log("SkillMgmt: scanning skills ...", name: "SkillManagementVM")
-        model.isLoading = true
-        defer { model.isLoading = false }
+        DMLogger.log("SkillMgmt: loading skills from API ...", name: "SkillManagementVM")
+        if model.skills.isEmpty {
+            model.isLoading = true
+        } else {
+            model.isRefreshing = true
+        }
+        model.errorMessage = nil
+        defer {
+            model.isLoading = false
+            model.isRefreshing = false
+        }
 
-        // 1. 扫描已安装技能
-        let installed: [String: [RawSkillInfo]]
-        do {
-            installed = try scanner.scanSkills()
-        } catch {
-            DMLogger.error(
-                "SkillMgmt: scan installed failed \(error.localizedDescription)",
-                name: "SkillManagementVM"
+        guard let rawSkills = await client.getSkills() else {
+            model.errorMessage = "无法从 Dashboard 获取技能列表，请确认 `hermes dashboard` 已启动。"
+            DMLogger.error("SkillMgmt: failed to fetch skills from API", name: "SkillManagementVM")
+            return
+        }
+
+        var groups: [String: [SkillItem]] = [:]
+        for raw in rawSkills {
+            guard let name = raw["name"] as? String, !name.isEmpty else { continue }
+            let description = raw["description"] as? String ?? ""
+            let category = raw["category"] as? String ?? "Uncategorized"
+            let enabled = raw["enabled"] as? Bool ?? false
+
+            let item = SkillItem(
+                id: name,
+                name: name,
+                description: description,
+                category: category,
+                path: "\(category)/\(name)",
+                isEnabled: enabled
             )
-            installed = [:]
+            groups[category, default: []].append(item)
         }
 
-        // 2. 扫描官方可选技能
-        let optional: [String: [OptionalSkillInfo]]
-        do {
-            optional = try scanner.scanOptionalSkills()
-        } catch {
-            DMLogger.error(
-                "SkillMgmt: scan optional failed \(error.localizedDescription)",
-                name: "SkillManagementVM"
+        let sortedCategories = groups.keys.sorted()
+        model.skills = sortedCategories.map { category in
+            let skills = (groups[category] ?? [])
+                .sorted { $0.name < $1.name }
+            return SkillCategoryGroup(
+                name: Self.formatCategoryName(category),
+                skills: skills
             )
-            optional = [:]
         }
-
-        var builtIn: [SkillCategoryGroup] = []
-        var available: [SkillCategoryGroup] = []
-
-        // 3. 合并所有分类名(已安装 + 可选),保证分类显示稳定
-        let allCategories = Set(installed.keys).union(optional.keys)
-        let sortedCategories = allCategories.sorted()
-
-        for category in sortedCategories {
-            // 3.1 内置技能 = 该分类下 isBuiltIn=true 的已安装技能
-            let builtInSkills: [SkillItem] = (installed[category] ?? [])
-                .filter { $0.isBuiltIn }
-                .map { raw in
-                    let display = SkillCatalog.displayInfo(for: raw.id)
-                    return SkillItem(
-                        id: raw.id,
-                        name: display?.name ?? raw.id,
-                        description: display?.description ?? "",
-                        category: raw.category,
-                        path: raw.path,
-                        isEnabled: raw.isEnabled
-                    )
-                }
-                .sorted { $0.id < $1.id }
-
-            // 3.2 可用技能 = 官方 optional-skills 目录下的技能(已安装/未安装都算)
-            //     + 已安装但非内置的用户自定义技能
-            let optSkills: [SkillItem] = (optional[category] ?? [])
-                .map { raw in
-                    let display = SkillCatalog.displayInfo(for: raw.id)
-                    return SkillItem(
-                        id: raw.id,
-                        name: display?.name ?? raw.id,
-                        description: display?.description ?? "",
-                        category: raw.category,
-                        path: raw.path,
-                        isEnabled: raw.isInstalled
-                    )
-                }
-                .sorted { $0.id < $1.id }
-
-            let userSkills: [SkillItem] = (installed[category] ?? [])
-                .filter { !$0.isBuiltIn }
-                .map { raw in
-                    let display = SkillCatalog.displayInfo(for: raw.id)
-                    return SkillItem(
-                        id: raw.id,
-                        name: display?.name ?? raw.id,
-                        description: display?.description ?? "",
-                        category: raw.category,
-                        path: raw.path,
-                        isEnabled: raw.isEnabled
-                    )
-                }
-                .sorted { $0.id < $1.id }
-
-            // 合并时按 id 去重(用户已安装的官方技能只保留一次,优先用 installed 的显示信息)
-            var seenIds: Set<String> = []
-            var availableSkills: [SkillItem] = []
-            for skill in (optSkills + userSkills) {
-                if seenIds.insert(skill.id).inserted {
-                    availableSkills.append(skill)
-                }
-            }
-
-            let categoryTitle = Self.formatCategoryName(category)
-
-            if !builtInSkills.isEmpty {
-                builtIn.append(SkillCategoryGroup(name: categoryTitle, skills: builtInSkills))
-            }
-            if !availableSkills.isEmpty {
-                available.append(SkillCategoryGroup(name: categoryTitle, skills: availableSkills))
-            }
-        }
+        Self.cachedSkills = model.skills
+        model.errorMessage = nil
 
         DMLogger.log(
-            "SkillMgmt: builtIn=\(builtIn.count) cats, available=\(available.count) cats",
+            "SkillMgmt: loaded \(model.skills.count) categories, \(model.allSkills.count) skills",
             name: "SkillManagementVM"
         )
-        model.builtInSkills = builtIn
-        model.availableSkills = available
     }
 
-    /// 重新从磁盘加载 — 对齐 Flutter `refreshSkills()`。
+    /// 重新加载技能列表（有缓存时后台刷新，避免页面滚动位置重置）。
     func refreshSkills() async {
-        model.isLoading = true
         await loadSkills()
-    }
-
-    // MARK: - Tab switching
-
-    /// 切换 Tab — 对齐 Flutter `switchTab`。
-    func switchTab(_ tab: SkillFilterTab) {
-        DMLogger.log("SkillMgmt: switchTab -> \(tab.rawValue)", name: "SkillManagementVM")
-        model.activeTab = tab
     }
 
     // MARK: - Skill state mutations
 
-    /// 切换技能启用状态 — 对齐 Flutter `toggleSkill`。
+    /// 切换技能启用状态 — 调用 `PUT /api/skills/toggle`。
+    ///
+    /// 成功/失败均只修改本地对应条目，不重新拉取全量列表，从而保留滚动位置与缓存。
     func toggleSkill(_ skillId: String) {
-        model = updateSkill(in: model, skillId: skillId) { $0.updatingEnabled(!$0.isEnabled) }
+        guard let skill = findSkill(by: skillId) else { return }
+        let newEnabled = !skill.isEnabled
+
+        DMLogger.log(
+            "SkillMgmt: toggle \(skillId) -> \(newEnabled)",
+            name: "SkillManagementVM"
+        )
+
+        // 立即在 UI 上反映变更并进入 loading。
+        model = updateSkill(skillId: skillId) { $0.updatingEnabled(newEnabled).updatingToggling(true) }
+
+        Task { [weak self] in
+            guard let self else { return }
+            let ok = await self.client.toggleSkill(name: skillId, enabled: newEnabled)
+            if !ok {
+                DMLogger.error(
+                    "SkillMgmt: toggle failed for \(skillId), reverting UI",
+                    name: "SkillManagementVM"
+                )
+                self.model = self.updateSkill(skillId: skillId) {
+                    $0.updatingEnabled(!newEnabled).updatingToggling(false)
+                }
+                self.model.errorMessage = "切换技能状态失败：\(skillId)"
+                return
+            }
+            // 仅更新本地状态，不刷新全量列表，避免滚动回顶。
+            self.model = self.updateSkill(skillId: skillId) { $0.updatingToggling(false) }
+            self.syncCache()
+        }
     }
 
-    /// 安装（启用）一个可选技能 — 实际执行 `hermes skills install official/<cat>/<id>`，
-    /// 安装完成后重新扫描磁盘以同步状态。
-    func installSkill(_ skillId: String) {
-        DMLogger.log("SkillMgmt: install \(skillId)", name: "SkillManagementVM")
-        guard let category = findCategory(forSkill: skillId) else {
-            DMLogger.error(
-                "SkillMgmt: install failed, category not found for \(skillId)",
+    /// 选择/取消选择分类筛选。
+    func selectCategory(_ name: String?) {
+        model.selectedCategory = name
+    }
+
+    /// 将当前 skills 同步到内存缓存。
+    private func syncCache() {
+        Self.cachedSkills = model.skills
+    }
+
+    // MARK: - Create skill
+
+    /// 创建本地自定义技能。
+    ///
+    /// 按官方 `creating-skills` 指南，在 `~/.hermes/skills/<category>/<name>/SKILL.md`
+    /// 写入 YAML frontmatter + 用户提供的正文。
+    /// - Returns: 是否成功。
+    func createSkill(name: String, description: String, category: String, content: String) async -> Bool {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedDesc = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedCategory = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedContent = content.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !trimmedName.isEmpty, !trimmedCategory.isEmpty else { return false }
+
+        let slug = Self.slugify(trimmedName)
+        let categorySlug = Self.slugify(trimmedCategory)
+        let skillsDir = SkillScannerService.installedSkillsDir()
+        let skillDir = skillsDir.appendingPathComponent(categorySlug, isDirectory: true)
+            .appendingPathComponent(slug, isDirectory: true)
+        let skillMd = skillDir.appendingPathComponent("SKILL.md")
+
+        let fm = FileManager.default
+        do {
+            try fm.createDirectory(at: skillDir, withIntermediateDirectories: true)
+            let body = """
+            ---
+            name: \(slug)
+            description: \(trimmedDesc)
+            version: 1.0.0
+            metadata:
+              hermes:
+                tags: [\(categorySlug)]
+            ---
+
+            \(trimmedContent.isEmpty ? "# \(trimmedName)\n\n\(trimmedDesc)" : trimmedContent)
+            """
+            try body.write(to: skillMd, atomically: true, encoding: .utf8)
+            DMLogger.log(
+                "SkillMgmt: created skill at \(skillMd.path)",
                 name: "SkillManagementVM"
             )
-            return
+            await refreshSkills()
+            return true
+        } catch {
+            DMLogger.error(
+                "SkillMgmt: failed to create skill \(error.localizedDescription)",
+                name: "SkillManagementVM"
+            )
+            model.errorMessage = "创建技能失败：\(error.localizedDescription)"
+            return false
         }
-        // 立即在 UI 上反映"安装中"状态
-        model = updateSkill(in: model, skillId: skillId) { $0.updatingEnabled(true) }
-        Task { [weak self] in
-            guard let self else { return }
-            let ok = await self.installer.install(category: category, skillId: skillId)
-            if !ok {
-                DMLogger.error(
-                    "SkillMgmt: install failed for \(skillId), reverting UI",
-                    name: "SkillManagementVM"
-                )
-                await MainActor.run {
-                    self.model = self.updateSkill(in: self.model, skillId: skillId) {
-                        $0.updatingEnabled(false)
-                    }
-                }
-            }
-            // 重新从磁盘扫描,确保 isEnabled / isInstalled 与 CLI 真实状态一致
-            await self.refreshSkills()
-        }
-    }
-
-    /// 卸载一个已安装的可选技能 — 实际执行 `hermes skills uninstall <id>`。
-    func uninstallSkill(_ skillId: String) {
-        DMLogger.log("SkillMgmt: uninstall \(skillId)", name: "SkillManagementVM")
-        // 立即在 UI 上反映"卸载中"状态
-        model = updateSkill(in: model, skillId: skillId) { $0.updatingEnabled(false) }
-        Task { [weak self] in
-            guard let self else { return }
-            let ok = await self.installer.uninstall(skillId: skillId)
-            if !ok {
-                DMLogger.error(
-                    "SkillMgmt: uninstall failed for \(skillId), reverting UI",
-                    name: "SkillManagementVM"
-                )
-                await MainActor.run {
-                    self.model = self.updateSkill(in: self.model, skillId: skillId) {
-                        $0.updatingEnabled(true)
-                    }
-                }
-            }
-            await self.refreshSkills()
-        }
-    }
-
-    /// 还原一个内置技能（重新启用）— 对齐 Flutter `restoreSkill`。
-    func restoreSkill(_ skillId: String) {
-        DMLogger.log("SkillMgmt: restore \(skillId)", name: "SkillManagementVM")
-        model = updateSkill(in: model, skillId: skillId) { $0.updatingEnabled(true) }
     }
 
     // MARK: - Registry
 
-    /// 打开官方可选技能市场文档 — 对齐 Flutter `_HeaderBar` 的「浏览技能市场」按钮。
-    ///
-    /// 当前阶段没有真正的内建市场，因此用 NSWorkspace 跳到官方文档，
-    /// 让用户可以浏览完整可选技能清单与每项详情。
+    /// 打开官方可选技能市场文档。
     func browseRegistry() {
         let urlString = "https://hermes-agent.nousresearch.com/docs/zh-Hans/reference/optional-skills-catalog"
         DMLogger.log("SkillMgmt: browseRegistry -> \(urlString)", name: "SkillManagementVM")
@@ -245,46 +217,25 @@ final class SkillManagementViewModel: ObservableObject {
 
     // MARK: - Private
 
-    /// 在两个 Tab 的所有分类中查找并更新指定 skill。
+    private func findSkill(by skillId: String) -> SkillItem? {
+        model.allSkills.first { $0.id == skillId }
+    }
+
     private func updateSkill(
-        in model: SkillManagementModel,
         skillId: String,
         updater: (SkillItem) -> SkillItem
     ) -> SkillManagementModel {
         var newModel = model
-        newModel.builtInSkills = model.builtInSkills.map { updateGroup($0, skillId: skillId, updater: updater) }
-        newModel.availableSkills = model.availableSkills.map { updateGroup($0, skillId: skillId, updater: updater) }
+        newModel.skills = model.skills.map { group in
+            SkillCategoryGroup(
+                name: group.name,
+                skills: group.skills.map { $0.id == skillId ? updater($0) : $0 }
+            )
+        }
         return newModel
     }
 
-    private func updateGroup(
-        _ group: SkillCategoryGroup,
-        skillId: String,
-        updater: (SkillItem) -> SkillItem
-    ) -> SkillCategoryGroup {
-        SkillCategoryGroup(
-            name: group.name,
-            skills: group.skills.map { $0.id == skillId ? updater($0) : $0 }
-        )
-    }
-
-    /// 在当前 model 中查找指定 skillId 的 category 目录名。
-    /// 优先在 available 列表中查找(可选技能从这里安装),其次 builtIn。
-    private func findCategory(forSkill skillId: String) -> String? {
-        for group in model.availableSkills {
-            if let s = group.skills.first(where: { $0.id == skillId }) {
-                return s.category
-            }
-        }
-        for group in model.builtInSkills {
-            if let s = group.skills.first(where: { $0.id == skillId }) {
-                return s.category
-            }
-        }
-        return nil
-    }
-
-    /// 分类目录名 → 人类可读 Title（"claude-code" → "Claude Code"）— 对齐 Flutter `_formatCategoryName`。
+    /// 分类目录名 → 人类可读 Title（"claude-code" → "Claude Code"）。
     static func formatCategoryName(_ dirName: String) -> String {
         return dirName
             .split(separator: "-")
@@ -293,5 +244,15 @@ final class SkillManagementViewModel: ObservableObject {
                 return first.uppercased() + word.dropFirst()
             }
             .joined(separator: " ")
+    }
+
+    /// 将技能名/分类转换为目录安全的小写连字符形式。
+    static func slugify(_ input: String) -> String {
+        let allowed = CharacterSet.alphanumerics
+        return input
+            .lowercased()
+            .components(separatedBy: allowed.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: "-")
     }
 }

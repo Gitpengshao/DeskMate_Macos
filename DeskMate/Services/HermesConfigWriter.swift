@@ -791,6 +791,64 @@ final class HermesConfigWriter {
         }
     }
 
+    // MARK: - memory config
+
+    /// 读取 `config.yaml` 中 `memory.memory_enabled` 字段。
+    /// 未配置时默认返回 `true`，与 DeskMate 默认启用记忆的行为保持一致。
+    func readMemoryEnabled() -> Bool {
+        let content = readFileOrEmpty(path: configPath)
+        guard !content.isEmpty else { return true }
+        guard let raw = parseBlockField(content: content, block: "memory", key: "memory_enabled") else { return true }
+        return raw.lowercased() == "true"
+    }
+
+    /// 写入 `memory.memory_enabled` 到 `config.yaml`。
+    func writeMemoryEnabled(_ enabled: Bool) {
+        DMLogger.log("[writeMemoryEnabled] enabled=\(enabled)", name: "HermesConfigWriter")
+        var content = readFileOrEmpty(path: configPath)
+        content = upsertBlockField(
+            content: content,
+            block: "memory",
+            key: "memory_enabled",
+            value: enabled ? "true" : "false"
+        )
+        ensureDirectoryExists(path: hermesHome)
+        do {
+            try content.write(toFile: configPath, atomically: true, encoding: .utf8)
+            DMLogger.log("[writeMemoryEnabled] wrote config.yaml", name: "HermesConfigWriter")
+        } catch {
+            DMLogger.error("[writeMemoryEnabled] failed: \(error.localizedDescription)", name: "HermesConfigWriter")
+        }
+    }
+
+    /// 读取 `config.yaml` 中 `memory.user_profile_enabled` 字段。
+    /// 未配置时默认返回 `true`。
+    func readUserProfileEnabled() -> Bool {
+        let content = readFileOrEmpty(path: configPath)
+        guard !content.isEmpty else { return true }
+        guard let raw = parseBlockField(content: content, block: "memory", key: "user_profile_enabled") else { return true }
+        return raw.lowercased() == "true"
+    }
+
+    /// 写入 `memory.user_profile_enabled` 到 `config.yaml`。
+    func writeUserProfileEnabled(_ enabled: Bool) {
+        DMLogger.log("[writeUserProfileEnabled] enabled=\(enabled)", name: "HermesConfigWriter")
+        var content = readFileOrEmpty(path: configPath)
+        content = upsertBlockField(
+            content: content,
+            block: "memory",
+            key: "user_profile_enabled",
+            value: enabled ? "true" : "false"
+        )
+        ensureDirectoryExists(path: hermesHome)
+        do {
+            try content.write(toFile: configPath, atomically: true, encoding: .utf8)
+            DMLogger.log("[writeUserProfileEnabled] wrote config.yaml", name: "HermesConfigWriter")
+        } catch {
+            DMLogger.error("[writeUserProfileEnabled] failed: \(error.localizedDescription)", name: "HermesConfigWriter")
+        }
+    }
+
     // MARK: - agent block helpers
 
     /// 解析 `agent:` 块下指定 2-空格缩进字段的原始字符串值。

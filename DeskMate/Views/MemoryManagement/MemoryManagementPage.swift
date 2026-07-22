@@ -21,6 +21,7 @@ struct MemoryManagementPage: View {
             MMPalette.bgBase.ignoresSafeArea()
             VStack(spacing: 0) {
                 pageHeader
+                MMConfigBar(viewModel: viewModel)
                 MMTabBar(viewModel: viewModel)
                 MMCapacityBar(
                     viewModel: viewModel,
@@ -83,6 +84,7 @@ struct MemoryManagementPage: View {
             Spacer()
             Button(action: {
                 Task {
+                    await viewModel.loadMemoryConfig()
                     switch viewModel.model.activeTab {
                     case .memory:      await viewModel.loadMemories()
                     case .userProfile: await viewModel.loadUserProfile()
@@ -131,7 +133,9 @@ struct MemoryManagementPage: View {
     // MEMORY.md Tab
     @ViewBuilder
     private var memoryTabContent: some View {
-        if viewModel.model.isLoadingMemories {
+        if !viewModel.model.memoryEnabled {
+            MMDisabledFeatureView(icon: "brain.head.profile", title: MMText.disabledMemory)
+        } else if viewModel.model.isLoadingMemories {
             MMLoadingView(title: MMText.loadingMemories)
         } else if viewModel.model.memoryEntries.isEmpty {
             MMEmptyView(icon: "tray", title: MMText.emptyMemory)
@@ -157,7 +161,9 @@ struct MemoryManagementPage: View {
     // USER.md Tab
     @ViewBuilder
     private var userProfileTabContent: some View {
-        if viewModel.model.isLoadingUserProfile {
+        if !viewModel.model.userProfileEnabled {
+            MMDisabledFeatureView(icon: "person.crop.circle", title: MMText.disabledPersona)
+        } else if viewModel.model.isLoadingUserProfile {
             MMLoadingView(title: MMText.loadingPersonas)
         } else if viewModel.model.userProfileEntries.isEmpty {
             MMEmptyView(icon: "person.crop.circle", title: MMText.emptyPersona)

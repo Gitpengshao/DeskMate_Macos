@@ -102,31 +102,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppDelegate.shared = self
 
+        let launchStart = Date()
         NSLog("[AppDelegate] applicationDidFinishLaunching: 启动")
 
         // 隐藏 Dock 图标，仅通过灵动岛和桌宠交互
         NSApplication.shared.setActivationPolicy(.accessory)
 
         DispatchQueue.main.async {
+            let stepStart = Date()
             // 1. 隐藏 WindowGroup 的占位窗口
             self.hidePlaceholderWindow()
+            NSLog("[AppDelegate] 启动步骤 1/8 hidePlaceholderWindow 完成，耗时 %.3fs，主线程=%@",
+                  Date().timeIntervalSince(stepStart), Thread.isMainThread ? "YES" : "NO")
 
+            let step2Start = Date()
             // 2. 创建独立的桌宠悬浮窗口
             self.setupPetWindow()
+            NSLog("[AppDelegate] 启动步骤 2/8 setupPetWindow 完成，耗时 %.3fs，主线程=%@",
+                  Date().timeIntervalSince(step2Start), Thread.isMainThread ? "YES" : "NO")
 
+            let step3Start = Date()
             // 3. 初始化全局语音快捷键监听（根据设置自动注册/注销）
             _ = GlobalShortcutManager.shared
+            NSLog("[AppDelegate] 启动步骤 3/8 GlobalShortcutManager 完成，耗时 %.3fs，主线程=%@",
+                  Date().timeIntervalSince(step3Start), Thread.isMainThread ? "YES" : "NO")
 
+            let step4Start = Date()
             // 4. 预初始化会在主窗口 body 中作为 @ObservedObject 使用的全局共享 ViewModel，
             //    提前完成 init 与首次 objectWillChange，避免在视图更新期间触发状态修改警告。
             _ = AiChatViewModel.shared
             _ = SettingsManager.shared
+            NSLog("[AppDelegate] 启动步骤 4/8 预初始化 ViewModels 完成，耗时 %.3fs，主线程=%@",
+                  Date().timeIntervalSince(step4Start), Thread.isMainThread ? "YES" : "NO")
 
+            let step5Start = Date()
             // 5. 设置灵动岛回调
             self.notchManager.onOpenConsole = { [weak self] in
                 self?.openConsole()
             }
+            NSLog("[AppDelegate] 启动步骤 5/8 设置灵动岛回调 完成，耗时 %.3fs，主线程=%@",
+                  Date().timeIntervalSince(step5Start), Thread.isMainThread ? "YES" : "NO")
 
+            let step6Start = Date()
             // 6. 监听控制台窗口 key 状态变化，驱动灵动岛悬浮内容在“进入控制台”与“Token 统计”之间切换。
             NotificationCenter.default.addObserver(
                 self,
@@ -148,41 +165,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 object: nil
             )
             self.updateConsoleKeyState()
+            NSLog("[AppDelegate] 启动步骤 6/8 添加窗口观察者 完成，耗时 %.3fs，主线程=%@",
+                  Date().timeIntervalSince(step6Start), Thread.isMainThread ? "YES" : "NO")
 
+            let step7Start = Date()
             // 7. 启动时显示灵动岛
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                let showStart = Date()
+                NSLog("[AppDelegate] 启动步骤 7/8 开始显示灵动岛，主线程=%@",
+                      Thread.isMainThread ? "YES" : "NO")
                 self?.notchManager.show()
+                NSLog("[AppDelegate] 启动步骤 7/8 显示灵动岛调用返回，耗时 %.3fs，主线程=%@",
+                      Date().timeIntervalSince(showStart), Thread.isMainThread ? "YES" : "NO")
             }
+            NSLog("[AppDelegate] 启动步骤 7/8 已调度灵动岛显示，耗时 %.3fs，主线程=%@",
+                  Date().timeIntervalSince(step7Start), Thread.isMainThread ? "YES" : "NO")
 
-            // 5. 如果 onboarding 已完成，先完整检测 Hermes 环境再决定是否进入首页
+            // 8. 如果 onboarding 已完成，先完整检测 Hermes 环境再决定是否进入首页
+            let step8Start = Date()
             let onboardingCompleted = UserDefaults.standard.bool(forKey: "onboarding_completed")
             NSLog("[AppDelegate] onboarding_completed = \(onboardingCompleted)")
             if onboardingCompleted {
                 Task.detached(priority: .userInitiated) { [weak self] in
+                    let envStart = Date()
+                    NSLog("[AppDelegate] 启动步骤 8/8 开始检测 Hermes 环境，主线程=%@",
+                          Thread.isMainThread ? "YES" : "NO")
                     let ready = await self?.isHermesEnvironmentReady() ?? false
-                    await MainActor.run {
-                        self?.initialHermesCheckCompleted = true
-                        if ready {
-                            NSLog("[AppDelegate] Hermes 环境完整，后台启动 Gateway")
-                            // 在后台线程启动 Gateway，避免主线程阻塞导致桌宠动画卡顿。
-                            // 不预加载主窗口，避免 MainPage body 在 Gateway 未就绪时提前求值，
-                            // 触发 @StateObject init 与 objectWillChange 导致状态更新冲突。
-                            Task.detached(priority: .userInitiated) { [weak self] in
-                                // 先停止所有已注册及残留的 Gateway 进程，确保端口释放后再启动，
-                                // 避免 --replace 替换旧实例时因端口未释放而启动失败。
-                                await HermesGatewayService.shared.stopAllGateways()
-                                await self?.startHermesGatewayIfNeeded()
-                            }
-                        } else {
+                    NSLog("[AppDelegate] 启动步骤 8/8 Hermes 环境检测完成 ready=\(ready)，耗时 %.3fs，主线程=%@",
+                          Date().timeIntervalSince(envStart), Thread.isMainThread ? "YES" : "NO")
+
+                    if ready {
+                        NSLog("[AppDelegate] Hermes 环境完整，后台启动 Gateway")
+                        // 在后台线程启动 Gateway 与 Dashboard，避免主线程阻塞导致桌宠动画卡顿。
+                        // 不预加载主窗口，避免 MainPage body 在 Gateway 未就绪时提前求值，
+                        // 触发 @StateObject init 与 objectWillChange 导致状态更新冲突。
+                        let gatewayStart = Date()
+                        await HermesGatewayService.shared.stopAllGateways()
+                        let gatewayReady = await self?.startAndWaitForHermesGateway() ?? false
+                        NSLog("[AppDelegate] 启动步骤 8/8 Gateway 启动流程完成 ready=\(gatewayReady)，耗时 %.3fs，主线程=%@",
+                              Date().timeIntervalSince(gatewayStart), Thread.isMainThread ? "YES" : "NO")
+
+                        // Gateway 启动完成后，异步启动 Dashboard（技能管理等页面依赖它）。
+                        if gatewayReady {
+                            let dashboardStart = Date()
+                            _ = await HermesDashboardService.shared.startDashboard()
+                            NSLog("[AppDelegate] 启动步骤 8/8 Dashboard 启动流程完成，耗时 %.3fs，主线程=%@",
+                                  Date().timeIntervalSince(dashboardStart), Thread.isMainThread ? "YES" : "NO")
+                        }
+                    } else {
+                        await MainActor.run {
                             NSLog("[AppDelegate] onboarding_completed=true 但 Hermes 环境缺失，打开 Onboarding（不重置完成标志）")
                             self?.forceShowOnboarding = true
                             self?.openConsole()
                         }
                     }
+
+                    await MainActor.run {
+                        self?.initialHermesCheckCompleted = true
+                    }
                 }
             } else {
                 self.initialHermesCheckCompleted = true
             }
+            NSLog("[AppDelegate] 启动步骤 8/8 已调度 Hermes 环境检测，耗时 %.3fs，主线程=%@",
+                  Date().timeIntervalSince(step8Start), Thread.isMainThread ? "YES" : "NO")
         }
     }
 
@@ -345,6 +391,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.makeKeyAndOrderFront(nil)
         NSApplication.shared.activate(ignoringOtherApps: true)
 
+        // 启动 Dashboard 状态监控；Dashboard 本身在后台异步拉起，不阻塞窗口展示。
+        startDashboardMonitoring()
+        Task.detached(priority: .userInitiated) { [weak self] in
+            _ = await HermesDashboardService.shared.startDashboard()
+            await DashboardConnectionManager.shared.refresh()
+        }
+
         // 延迟通知灵动岛控制台已打开，避免与主窗口首次 body 求值/状态初始化冲突。
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
@@ -363,6 +416,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 对齐 Onboarding 的判定标准：已安装、已配置、API Key 已配置、默认模型已配置。
     /// 在后台线程执行，避免主线程卡顿影响桌宠动画。
     private func isHermesEnvironmentReady() async -> Bool {
+        let start = Date()
         // 5 秒内结果缓存，避免启动/点击控制台/MainPage.onAppear 重复执行慢速检测。
         if let lastResult = lastHermesCheckResult,
            let lastTime = lastHermesCheckTime,
@@ -371,16 +425,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return lastResult
         }
 
+        NSLog("[AppDelegate] isHermesEnvironmentReady: 开始后台检测，主线程=%@",
+              Thread.isMainThread ? "YES" : "NO")
         let ready = await Task.detached(priority: .userInitiated) { [weak self] in
             guard let self = self else { return false }
+            let checkStart = Date()
             let status = self.onboardingVM.checkHermes()
             let result = status.installed && status.configured && status.hasApiKey && status.hasModelConfigured
-            NSLog("[AppDelegate] isHermesEnvironmentReady: installed=\(status.installed), configured=\(status.configured), hasApiKey=\(status.hasApiKey), hasModelConfigured=\(status.hasModelConfigured), ready=\(result)")
+            NSLog("[AppDelegate] isHermesEnvironmentReady: installed=\(status.installed), configured=\(status.configured), hasApiKey=\(status.hasApiKey), hasModelConfigured=\(status.hasModelConfigured), ready=\(result), 检测耗时 %.3fs, 主线程=%@",
+                  Date().timeIntervalSince(checkStart), Thread.isMainThread ? "YES" : "NO")
             return result
         }.value
 
         lastHermesCheckResult = ready
         lastHermesCheckTime = Date()
+        NSLog("[AppDelegate] isHermesEnvironmentReady: 返回 ready=\(ready)，总耗时 %.3fs",
+              Date().timeIntervalSince(start))
         return ready
     }
 
@@ -410,6 +470,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// 启动 Gateway 并等待其就绪；返回是否成功。幂等。
     private func startAndWaitForHermesGateway() async -> Bool {
+        let start = Date()
+        NSLog("[AppDelegate] startAndWaitForHermesGateway: 进入，gatewayStarted=\(gatewayStarted)，主线程=%@",
+              Thread.isMainThread ? "YES" : "NO")
         // 若 Gateway 已在运行且健康，直接复用，避免 Onboarding 完成后再无意义重启
         // 导致旧实例端口未释放、新实例因 address already in use 启动失败。
         if await HermesGatewayService.shared.isHealthy() {
@@ -421,6 +484,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // Gateway 就绪后再通知灵动岛切换到今日汇总视图，避免未就绪时切换 content 卡死。
                 self.notchManager.consoleDidOpen()
             }
+            NSLog("[AppDelegate] startAndWaitForHermesGateway: 复用路径完成，总耗时 %.3fs",
+                  Date().timeIntervalSince(start))
             return true
         }
 
@@ -431,11 +496,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         gatewayStarted = true
 
+        let gatewayStart = Date()
         let started = await HermesGatewayService.shared.startGateway()
+        NSLog("[AppDelegate] startAndWaitForHermesGateway: startGateway 返回 started=\(started)，耗时 %.3fs",
+              Date().timeIntervalSince(gatewayStart))
         if started {
             NSLog("[AppDelegate] startAndWaitForHermesGateway: Gateway 启动成功")
             await MainActor.run {
-                // Gateway 启动成功后再启动周期性健康探测，避免未就绪时反复刷新触发视图循环。
+                // Gateway 就绪后再启动周期性健康探测，避免未就绪时反复刷新触发视图循环。
                 self.startGatewayMonitoring()
                 // Gateway 就绪后再通知灵动岛切换到今日汇总视图，避免未就绪时切换 content 卡死。
                 self.notchManager.consoleDidOpen()
@@ -444,16 +512,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSLog("[AppDelegate] startAndWaitForHermesGateway: Gateway 启动失败")
             gatewayStarted = false
         }
+        NSLog("[AppDelegate] startAndWaitForHermesGateway: 总耗时 %.3fs，返回 started=\(started)",
+              Date().timeIntervalSince(start))
         return started
     }
 
     /// 在后台启动 Gateway（应用启动阶段使用，不阻塞调用方）。
     private func startHermesGatewayIfNeeded() {
-        NSLog("[AppDelegate] startHermesGatewayIfNeeded: gatewayStarted=\(gatewayStarted)")
+        NSLog("[AppDelegate] startHermesGatewayIfNeeded: gatewayStarted=\(gatewayStarted)，主线程=%@",
+              Thread.isMainThread ? "YES" : "NO")
         guard !gatewayStarted else { return }
         Task.detached(priority: .userInitiated) { [weak self] in
+            let start = Date()
+            NSLog("[AppDelegate] startHermesGatewayIfNeeded Task: 开始启动 Gateway，主线程=%@",
+                  Thread.isMainThread ? "YES" : "NO")
             _ = await self?.startAndWaitForHermesGateway()
+            NSLog("[AppDelegate] startHermesGatewayIfNeeded Task: Gateway 启动流程结束，耗时 %.3fs，主线程=%@",
+                  Date().timeIntervalSince(start), Thread.isMainThread ? "YES" : "NO")
         }
+    }
+
+    // MARK: - Hermes Dashboard
+
+    /// 在后台启动 Dashboard（应用启动/主控制台打开时使用，不阻塞调用方）。
+    private func startHermesDashboardIfNeeded() {
+        NSLog("[AppDelegate] startHermesDashboardIfNeeded: 主线程=%@",
+              Thread.isMainThread ? "YES" : "NO")
+        Task.detached(priority: .userInitiated) {
+            let start = Date()
+            NSLog("[AppDelegate] startHermesDashboardIfNeeded Task: 开始启动 Dashboard，主线程=%@",
+                  Thread.isMainThread ? "YES" : "NO")
+            _ = await HermesDashboardService.shared.startDashboard()
+            NSLog("[AppDelegate] startHermesDashboardIfNeeded Task: Dashboard 启动流程结束，耗时 %.3fs，主线程=%@",
+                  Date().timeIntervalSince(start), Thread.isMainThread ? "YES" : "NO")
+        }
+    }
+
+    /// 启动 Dashboard 健康状态周期探测。
+    private func startDashboardMonitoring() {
+        DashboardConnectionManager.shared.startMonitoring()
+        Task { await DashboardConnectionManager.shared.refresh() }
     }
 
     // MARK: - 宠物窗口 显示/隐藏
@@ -538,9 +636,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startQuitCleanup(killGateways: Bool) -> NSApplication.TerminateReply {
         NSLog("[AppDelegate] startQuitCleanup: killGateways=\(killGateways)")
         if killGateways {
-            // 异步关闭 Gateway，不阻塞退出流程，确保 app 立即响应退出。
+            // 异步关闭 Gateway 与 Dashboard，不阻塞退出流程，确保 app 立即响应退出。
             Task.detached {
                 await HermesGatewayService.shared.stopAllGateways()
+                await HermesDashboardService.shared.stopDashboard()
             }
         }
         return .terminateNow
@@ -566,6 +665,7 @@ extension AppDelegate: NSWindowDelegate {
             notchManager.consoleDidClose()
             restoreAccessoryPolicy()
             GatewayConnectionManager.shared.stopMonitoring()
+            DashboardConnectionManager.shared.stopMonitoring()
         }
     }
 

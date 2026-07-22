@@ -1,43 +1,5 @@
 import SwiftUI
 
-// MARK: - Tab Bar
-
-/// 顶部 Tab 栏：内置技能 / 可用技能 — 对齐 Flutter `_TabBar` + `_TabChip`。
-struct SMTabBar: View {
-    @ObservedObject var viewModel: SkillManagementViewModel
-
-    var body: some View {
-        HStack(spacing: 24) {
-            tabChip(.builtIn, title: SMText.tabBuiltIn)
-            tabChip(.available, title: SMText.tabAvailable)
-            Spacer()
-        }
-        .padding(.horizontal, 24)
-        .padding(.top, 16)
-        .padding(.bottom, 12)
-    }
-
-    @ViewBuilder
-    private func tabChip(_ tab: SkillFilterTab, title: String) -> some View {
-        let isActive = viewModel.model.activeTab == tab
-        Button(action: { viewModel.switchTab(tab) }) {
-            VStack(spacing: 0) {
-                Text(title)
-                    .font(.system(size: 14, weight: isActive ? .medium : .regular))
-                    .foregroundColor(isActive ? SMPalette.textPrimary : SMPalette.textMuted)
-                    .frame(height: 20)
-                Rectangle()
-                    .fill(isActive ? SMPalette.textPrimary : Color.clear)
-                    .frame(height: 2)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-}
-
 // MARK: - Skill Category List
 
 /// 分类技能列表 — 对齐 Flutter `_SkillCategoryList`。
@@ -45,22 +7,19 @@ struct SMSkillCategoryList: View {
     @ObservedObject var viewModel: SkillManagementViewModel
 
     var body: some View {
-        if viewModel.model.isLoading {
+        if viewModel.model.isLoading && viewModel.model.skills.isEmpty {
             SMLoadingView(title: SMText.loading)
-        } else if viewModel.model.activeGroups.isEmpty {
+        } else if viewModel.model.filteredSkills.isEmpty {
             SMEmptyView(
                 icon: "tray",
-                title: viewModel.model.activeTab == .builtIn
-                    ? SMText.emptyBuiltIn
-                    : SMText.emptyAvailable
+                title: SMText.emptyAll
             )
         } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 24) {
-                    ForEach(viewModel.model.activeGroups) { group in
+                    ForEach(viewModel.model.filteredSkills) { group in
                         SMCategorySection(
                             group: group,
-                            isBuiltIn: viewModel.model.activeTab == .builtIn,
                             viewModel: viewModel
                         )
                     }
@@ -78,7 +37,6 @@ struct SMSkillCategoryList: View {
 /// 单个分类分组（标题 + 计数 + 技能卡片网格）— 对齐 Flutter `_CategorySection`。
 struct SMCategorySection: View {
     let group: SkillCategoryGroup
-    let isBuiltIn: Bool
     @ObservedObject var viewModel: SkillManagementViewModel
 
     private let cardWidth: CGFloat = 300
@@ -107,10 +65,7 @@ struct SMCategorySection: View {
                 ForEach(group.skills) { skill in
                     SMSkillCard(
                         skill: skill,
-                        isBuiltIn: isBuiltIn,
-                        onInstall: { viewModel.installSkill(skill.id) },
-                        onUninstall: { viewModel.uninstallSkill(skill.id) },
-                        onRestore: { viewModel.restoreSkill(skill.id) }
+                        onToggle: { viewModel.toggleSkill(skill.id) }
                     )
                 }
             }
@@ -123,14 +78,19 @@ struct SMCategorySection: View {
 /// 单个技能卡片 — 对齐 Flutter `_SkillCard`。
 struct SMSkillCard: View {
     let skill: SkillItem
-    let isBuiltIn: Bool
-    var onInstall: () -> Void
-    var onUninstall: () -> Void
-    var onRestore: () -> Void
+    var onToggle: () -> Void
+
+    @State private var localEnabled: Bool
+
+    init(skill: SkillItem, onToggle: @escaping () -> Void) {
+        self.skill = skill
+        self.onToggle = onToggle
+        _localEnabled = State(initialValue: skill.isEnabled)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Title row + Installed badge
+            // Title row + status badge
             HStack(alignment: .top, spacing: 8) {
                 Text(skill.name)
                     .font(.system(size: 15, weight: .semibold))
@@ -147,6 +107,20 @@ struct SMSkillCard: View {
                         .background(
                             RoundedRectangle(cornerRadius: 4)
                                 .fill(SMPalette.statusInstalledBg)
+                        )
+                } else {
+                    Text(SMText.badgeDisabled)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(SMPalette.textMuted)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(SMPalette.bgElevated)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 4)
+                                .stroke(SMPalette.border, lineWidth: 0.56)
                         )
                 }
             }
@@ -172,10 +146,25 @@ struct SMSkillCard: View {
                     .truncationMode(.middle)
             }
 
-            // Action button
-            HStack {
+            // Toggle row
+            HStack(spacing: 8) {
                 Spacer()
-                actionButton
+                if skill.isToggling {
+                    ProgressView()
+                        .controlSize(.small)
+                        .colorScheme(.dark)
+                        .frame(width: 38, height: 22)
+                } else {
+                    Toggle(skill.isEnabled ? SMText.actionDisable : SMText.actionEnable, isOn: $localEnabled)
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .disabled(skill.isToggling)
+                        .onChange(of: localEnabled) { newValue in
+                            if newValue != skill.isEnabled {
+                                onToggle()
+                            }
+                        }
+                }
             }
             .padding(.top, 4)
         }
@@ -189,55 +178,8 @@ struct SMSkillCard: View {
             RoundedRectangle(cornerRadius: 10)
                 .stroke(SMPalette.border, lineWidth: 0.56)
         )
-    }
-
-    @ViewBuilder
-    private var actionButton: some View {
-        if isBuiltIn {
-            // 内置技能：已启用时禁用按钮；未启用时显示 Restore（重新启用）
-            Button(action: { if !skill.isEnabled { onRestore() } }) {
-                Text(SMText.actionRestore)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(
-                        skill.isEnabled ? SMPalette.textDisabled : SMPalette.textMuted
-                    )
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(SMPalette.border, lineWidth: 0.56)
-                    )
-            }
-            .buttonStyle(.plain)
-            .disabled(skill.isEnabled)
-        } else if skill.isEnabled {
-            // 可用技能：已安装时显示 Uninstall
-            Button(action: onUninstall) {
-                Text(SMText.actionUninstall)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(SMPalette.textMuted)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(SMPalette.border, lineWidth: 0.56)
-                    )
-            }
-            .buttonStyle(.plain)
-        } else {
-            // 可用技能：未安装时显示 Install（实心按钮）
-            Button(action: onInstall) {
-                Text(SMText.actionInstall)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(SMPalette.inverseInk)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(SMPalette.inverse)
-                    )
-            }
-            .buttonStyle(.plain)
+        .onChange(of: skill.isEnabled) { newValue in
+            localEnabled = newValue
         }
     }
 }
@@ -274,5 +216,45 @@ struct SMEmptyView: View {
                 .foregroundColor(SMPalette.textMuted)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - Category Filter Tag
+
+/// 顶部分类筛选 Tag。
+struct SMCategoryTag: View {
+    let title: String
+    let count: Int
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Text(title)
+                    .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
+                Text("\(count)")
+                    .font(.system(size: 11))
+                    .foregroundColor(isSelected ? SMPalette.inverseInk.opacity(0.7) : SMPalette.textMuted)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(isSelected ? SMPalette.inverseInk.opacity(0.12) : SMPalette.textMuted.opacity(0.12))
+                    )
+            }
+            .foregroundColor(isSelected ? SMPalette.inverseInk : SMPalette.textPrimary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isSelected ? SMPalette.inverse : SMPalette.bgElevated)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(isSelected ? Color.clear : SMPalette.border, lineWidth: 0.56)
+            )
+        }
+        .buttonStyle(.plain)
     }
 }

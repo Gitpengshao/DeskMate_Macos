@@ -40,6 +40,12 @@ enum MMText {
     static let tabUserProfile = "用户画像"
     static let tabSoulProfile = "灵魂画像"
 
+    // Feature toggles
+    static let toggleMemoryEnabled      = "记忆功能"
+    static let toggleMemorySubtitle     = "MEMORY.md 注入系统 prompt"
+    static let toggleUserProfileEnabled = "用户画像"
+    static let toggleUserProfileSubtitle = "USER.md 注入系统 prompt"
+
     // Capacity
     static func capacity(used: String, total: String, entries: String) -> String {
         return "\(used) / \(total) 字符 · \(entries) 条"
@@ -63,6 +69,9 @@ enum MMText {
     static let emptyMemory      = "暂无记忆条目"
     static let emptyPersona     = "暂无用户画像"
     static let emptySoul        = "暂无灵魂画像"
+    static let disabledMemory   = "记忆功能已禁用"
+    static let disabledPersona  = "用户画像已禁用"
+    static let disabledSubtitle = "在上方开启后，内容才会注入系统 prompt"
 
     // Delete dialog
     static let deletePersonaTitle   = "删除该条目？"

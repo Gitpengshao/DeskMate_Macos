@@ -1,5 +1,68 @@
 import SwiftUI
 
+// MARK: - Config Bar
+
+/// 顶部功能开关栏：控制 `memory.memory_enabled` 与 `memory.user_profile_enabled`。
+struct MMConfigBar: View {
+    @ObservedObject var viewModel: MemoryManagementViewModel
+
+    var body: some View {
+        HStack(spacing: 24) {
+            toggle(
+                title: MMText.toggleMemoryEnabled,
+                subtitle: MMText.toggleMemorySubtitle,
+                isOn: viewModel.model.memoryEnabled
+            ) { isOn in
+                viewModel.setMemoryEnabled(isOn)
+            }
+
+            toggle(
+                title: MMText.toggleUserProfileEnabled,
+                subtitle: MMText.toggleUserProfileSubtitle,
+                isOn: viewModel.model.userProfileEnabled
+            ) { isOn in
+                viewModel.setUserProfileEnabled(isOn)
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .background(MMPalette.bgPanel)
+        .overlay(
+            Rectangle()
+                .fill(MMPalette.border)
+                .frame(height: 1),
+            alignment: .bottom
+        )
+    }
+
+    private func toggle(
+        title: String,
+        subtitle: String,
+        isOn: Bool,
+        action: @escaping (Bool) -> Void
+    ) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(MMPalette.textPrimary)
+                Text(subtitle)
+                    .font(.system(size: 11))
+                    .foregroundColor(MMPalette.textMuted)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Toggle("", isOn: Binding(get: { isOn }, set: { action($0) }))
+                .toggleStyle(SwitchToggleStyle(tint: MMPalette.textPrimary))
+                .labelsHidden()
+                .frame(width: 44)
+        }
+        .frame(width: 220)
+    }
+}
+
 // MARK: - Tab Bar
 
 /// 顶部 Tab 栏：记忆 / 用户画像 / 灵魂画像。
@@ -61,7 +124,7 @@ struct MMCapacityBar: View {
             .font(.system(size: 11))
             .foregroundColor(MMPalette.textMuted)
             Spacer()
-            if viewModel.model.activeTab != .soulProfile {
+            if canAddEntry {
                 Button(action: onAdd) {
                     HStack(spacing: 6) {
                         Image(systemName: "plus")
@@ -92,6 +155,17 @@ struct MMCapacityBar: View {
         let formatter = NumberFormatter()
         formatter.groupingSeparator = ","
         return formatter.string(from: NSNumber(value: n)) ?? "\(n)"
+    }
+
+    private var canAddEntry: Bool {
+        switch viewModel.model.activeTab {
+        case .soulProfile:
+            return false
+        case .memory:
+            return viewModel.model.memoryEnabled
+        case .userProfile:
+            return viewModel.model.userProfileEnabled
+        }
     }
 }
 
@@ -155,6 +229,32 @@ struct MMEmptyView: View {
             Text(title)
                 .font(.system(size: 13))
                 .foregroundColor(MMPalette.textMuted)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - Disabled Feature State
+
+/// 功能被禁用时展示的占位视图。
+struct MMDisabledFeatureView: View {
+    let icon: String
+    let title: String
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 36, weight: .light))
+                .foregroundColor(MMPalette.textMuted)
+            VStack(spacing: 4) {
+                Text(title)
+                    .font(.system(size: 13))
+                    .foregroundColor(MMPalette.textMuted)
+                Text(MMText.disabledSubtitle)
+                    .font(.system(size: 11))
+                    .foregroundColor(MMPalette.textTertiary)
+                    .multilineTextAlignment(.center)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

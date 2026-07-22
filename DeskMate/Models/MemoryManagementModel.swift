@@ -68,6 +68,11 @@ struct MemoryManagementModel: Equatable {
     /// SOUL.md 单一条目（agent soul / personality）。
     var soulProfileEntries: [MemoryEntry]
 
+    /// `config.yaml` 中 `memory.memory_enabled` 开关状态。
+    var memoryEnabled: Bool
+    /// `config.yaml` 中 `memory.user_profile_enabled` 开关状态。
+    var userProfileEnabled: Bool
+
     var isLoadingMemories: Bool
     var isLoadingUserProfile: Bool
     var isLoadingSoulProfile: Bool
@@ -78,6 +83,8 @@ struct MemoryManagementModel: Equatable {
         memoryEntries: [MemoryEntry] = [],
         userProfileEntries: [MemoryEntry] = [],
         soulProfileEntries: [MemoryEntry] = [],
+        memoryEnabled: Bool = true,
+        userProfileEnabled: Bool = true,
         isLoadingMemories: Bool = false,
         isLoadingUserProfile: Bool = false,
         isLoadingSoulProfile: Bool = false,
@@ -87,6 +94,8 @@ struct MemoryManagementModel: Equatable {
         self.memoryEntries = memoryEntries
         self.userProfileEntries = userProfileEntries
         self.soulProfileEntries = soulProfileEntries
+        self.memoryEnabled = memoryEnabled
+        self.userProfileEnabled = userProfileEnabled
         self.isLoadingMemories = isLoadingMemories
         self.isLoadingUserProfile = isLoadingUserProfile
         self.isLoadingSoulProfile = isLoadingSoulProfile

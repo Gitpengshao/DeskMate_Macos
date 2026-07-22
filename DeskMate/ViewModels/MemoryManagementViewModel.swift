@@ -15,11 +15,16 @@ final class MemoryManagementViewModel: ObservableObject {
     // MARK: - Dependencies
 
     private let store: MemoryFileStore
+    private let configWriter: HermesConfigWriter
 
     // MARK: - Init
 
-    init(store: MemoryFileStore = MemoryFileStore()) {
+    init(
+        store: MemoryFileStore = MemoryFileStore(),
+        configWriter: HermesConfigWriter = HermesConfigWriter.shared
+    ) {
         self.store = store
+        self.configWriter = configWriter
 
         // 启动时异步加载。
         Task { [weak self] in
@@ -35,9 +40,39 @@ final class MemoryManagementViewModel: ObservableObject {
     // MARK: - Bootstrap
 
     private func bootstrap() async {
+        await loadMemoryConfig()
         await loadMemories()
         await loadUserProfile()
         await loadSoulProfile()
+    }
+
+    // MARK: - Memory config toggles
+
+    /// 从 `config.yaml` 读取 `memory.memory_enabled` 与 `memory.user_profile_enabled`。
+    func loadMemoryConfig() async {
+        DMLogger.log("loadMemoryConfig: reading memory block ...", name: "MemoryManagementVM")
+        let memoryEnabled = configWriter.readMemoryEnabled()
+        let userProfileEnabled = configWriter.readUserProfileEnabled()
+        model.memoryEnabled = memoryEnabled
+        model.userProfileEnabled = userProfileEnabled
+        DMLogger.log(
+            "loadMemoryConfig: memoryEnabled=\(memoryEnabled) userProfileEnabled=\(userProfileEnabled)",
+            name: "MemoryManagementVM"
+        )
+    }
+
+    /// 切换 `memory.memory_enabled` 并持久化到 `config.yaml`。
+    func setMemoryEnabled(_ enabled: Bool) {
+        DMLogger.log("setMemoryEnabled: \(model.memoryEnabled) -> \(enabled)", name: "MemoryManagementVM")
+        model.memoryEnabled = enabled
+        configWriter.writeMemoryEnabled(enabled)
+    }
+
+    /// 切换 `memory.user_profile_enabled` 并持久化到 `config.yaml`。
+    func setUserProfileEnabled(_ enabled: Bool) {
+        DMLogger.log("setUserProfileEnabled: \(model.userProfileEnabled) -> \(enabled)", name: "MemoryManagementVM")
+        model.userProfileEnabled = enabled
+        configWriter.writeUserProfileEnabled(enabled)
     }
 
     // MARK: - Tab switching

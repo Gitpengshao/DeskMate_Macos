@@ -83,6 +83,8 @@ final class HermesGatewayService {
 
     /// 停止所有已注册的 Gateway 进程，并清理系统中残留的 Hermes Gateway 进程。
     func stopAllGateways() async {
+        let start = Date()
+        DMLogger.log("stopAllGateways: 进入，主线程=\(Thread.isMainThread ? "YES" : "NO")", name: "HermesGateway")
         let instances = await Array(registry.instances.values)
         await MainActor.run { [weak self] in
             self?.currentProfile = nil
@@ -112,6 +114,7 @@ final class HermesGatewayService {
             await killListenersOnPort(port: AppConstants.defaultGatewayPort)
             await waitForPortRelease(port: AppConstants.defaultGatewayPort, maxWait: 15)
         }
+        DMLogger.log("stopAllGateways: 完成，总耗时 \(String(format: "%.3f", Date().timeIntervalSince(start)))s", name: "HermesGateway")
     }
 
     /// 指定 profile 的 Gateway 是否处于就绪状态。
@@ -186,28 +189,37 @@ final class HermesGatewayService {
     func waitForGatewayReady(port: Int = AppConstants.defaultGatewayPort,
                              process: Process? = nil,
                              maxWait: TimeInterval = 30) async -> Bool {
+        let start = Date()
+        NSLog("[HermesGateway] _waitForGatewayReady: 进入，maxWait=%.0fs", maxWait)
         let deadline = Date().addingTimeInterval(maxWait)
         var attempt = 0
 
         while Date() < deadline {
             attempt += 1
-            NSLog("[HermesGateway] _waitForGatewayReady: 第 \(attempt) 次健康检查 (port=\(port))...")
+            if attempt == 1 || attempt % 5 == 0 {
+                NSLog("[HermesGateway] _waitForGatewayReady: 第 \(attempt) 次健康检查 (port=\(port))，已耗时 %.3fs",
+                      Date().timeIntervalSince(start))
+            }
             if await isHealthy(port: port) {
-                NSLog("[HermesGateway] _waitForGatewayReady: 第 \(attempt) 次健康检查成功")
+                NSLog("[HermesGateway] _waitForGatewayReady: 第 \(attempt) 次健康检查成功，总耗时 %.3fs",
+                      Date().timeIntervalSince(start))
                 return true
             }
             // 进程已退出，端口不可能再就绪，立即失败
             if let process = process, !process.isRunning {
-                NSLog("[HermesGateway] _waitForGatewayReady: Gateway 进程已退出，停止等待")
+                NSLog("[HermesGateway] _waitForGatewayReady: Gateway 进程已退出，停止等待，耗时 %.3fs",
+                      Date().timeIntervalSince(start))
                 return false
             }
-            NSLog("[HermesGateway] _waitForGatewayReady: 第 \(attempt) 次健康检查失败，1s 后重试")
             try? await Task.sleep(nanoseconds: 1_000_000_000) // 1s
         }
 
         attempt += 1
-        NSLog("[HermesGateway] _waitForGatewayReady: 第 \(attempt) 次最终健康检查 (port=\(port))...")
-        return await isHealthy(port: port)
+        NSLog("[HermesGateway] _waitForGatewayReady: 达到最大等待时间 %.0fs，进行第 \(attempt) 次最终健康检查", maxWait)
+        let finalReady = await isHealthy(port: port)
+        NSLog("[HermesGateway] _waitForGatewayReady: 最终检查结果 ready=\(finalReady)，总耗时 %.3fs",
+              Date().timeIntervalSince(start))
+        return finalReady
     }
 
     // MARK: - Internal implementation
@@ -235,7 +247,7 @@ final class HermesGatewayService {
                 pythonPathToUse = defaultPythonPath
                 NSLog("[HermesGateway] startGatewayInternal: 回退到 default profile Python: \(defaultPythonPath)")
             } else {
-                let whichResult = runShellSync("which python3 2>/dev/null || which python 2>/dev/null")
+                let whichResult = await runShell("which python3 2>/dev/null || which python 2>/dev/null")
                 NSLog("[HermesGateway] startGatewayInternal: 系统 python 查找结果=\(whichResult)")
                 NSLog("[HermesGateway] startGatewayInternal: Python 路径不存在: \(targetPythonPath)")
                 return nil
@@ -254,6 +266,7 @@ final class HermesGatewayService {
         NSLog("[HermesGateway] startGatewayInternal: 使用 port=\(port)")
 
         // 若该 profile 已有实例，先停止。
+        let registryStart = Date()
         if let existing = await registry.instances[key] {
             DMLogger.log(
                 "startGatewayInternal: 发现已有实例，先停止 pid=\(existing.process.processIdentifier)",
@@ -264,8 +277,10 @@ final class HermesGatewayService {
             // 停止进程后等待端口真正释放，避免新进程因 address already in use 启动失败。
             await waitForPortRelease(port: existing.port, maxWait: 3)
         }
+        DMLogger.log("startGatewayInternal: registry 检查/停止完成，耗时 \(String(format: "%.3f", Date().timeIntervalSince(registryStart)))s", name: "HermesGateway")
 
         // 兜底：若目标端口仍被占用（残留进程未被注册或 TIME_WAIT 未过期），强制清理监听进程。
+        let portCleanupStart = Date()
         if isPortInUse(port: port) {
             DMLogger.log(
                 "startGatewayInternal: 端口 \(port) 仍被占用，强制清理监听进程",
@@ -274,6 +289,7 @@ final class HermesGatewayService {
             await killListenersOnPort(port: port)
             await waitForPortRelease(port: port, maxWait: 15)
         }
+        DMLogger.log("startGatewayInternal: 端口清理完成，耗时 \(String(format: "%.3f", Date().timeIntervalSince(portCleanupStart)))s", name: "HermesGateway")
 
         // 读取 profile 目录下的 .env
         let envPath = (hermesHome as NSString).appendingPathComponent(".env")
@@ -418,6 +434,8 @@ final class HermesGatewayService {
     /// 清理系统中非当前应用实例启动的残留 Hermes Gateway 进程。
     /// 通过命令行匹配与端口监听两种方式查找，避免残留进程继续占用端口。
     private func killOrphanedGatewayProcesses() async {
+        let start = Date()
+        DMLogger.log("killOrphanedGatewayProcesses: 进入，主线程=\(Thread.isMainThread ? "YES" : "NO")", name: "HermesGateway")
         var pids = Set<Int32>()
 
         // 1. 匹配命令行中包含 hermes gateway 相关字样的进程（排除 grep 自身）。
@@ -428,8 +446,13 @@ final class HermesGatewayService {
             "[g]ateway/run.py"
         ]
         for pattern in patterns {
-            let cmdOutput = runShellSync(
+            let psStart = Date()
+            let cmdOutput = await runShell(
                 "ps auxww | grep -E '\(pattern)' | awk '{print $2}' || true"
+            )
+            DMLogger.log(
+                "killOrphanedGatewayProcesses: ps pattern='\(pattern)' 耗时 \(String(format: "%.3f", Date().timeIntervalSince(psStart)))s，输出='\(cmdOutput)'",
+                name: "HermesGateway"
             )
             for line in cmdOutput.split(separator: "\n") {
                 let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -440,8 +463,13 @@ final class HermesGatewayService {
         }
 
         // 2. 查找占用默认 Gateway 端口的进程（不限于 LISTEN 状态，更彻底）。
-        let portOutput = runShellSync(
+        let lsofStart = Date()
+        let portOutput = await runShell(
             "lsof -i:\(AppConstants.defaultGatewayPort) -P -n | tail -n +2 | awk '{print $2}' || true"
+        )
+        DMLogger.log(
+            "killOrphanedGatewayProcesses: lsof 耗时 \(String(format: "%.3f", Date().timeIntervalSince(lsofStart)))s，输出='\(portOutput)'",
+            name: "HermesGateway"
         )
         for line in portOutput.split(separator: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -450,7 +478,10 @@ final class HermesGatewayService {
             }
         }
 
-        guard !pids.isEmpty else { return }
+        guard !pids.isEmpty else {
+            DMLogger.log("killOrphanedGatewayProcesses: 未发现残留进程，总耗时 \(String(format: "%.3f", Date().timeIntervalSince(start)))s", name: "HermesGateway")
+            return
+        }
 
         DMLogger.log(
             "killOrphanedGatewayProcesses: 发现 \(pids.count) 个残留 Gateway 进程: \(pids.sorted())",
@@ -458,47 +489,62 @@ final class HermesGatewayService {
         )
 
         // 发送 SIGTERM。
+        let sigtermStart = Date()
         for pid in pids {
             DMLogger.log("killOrphanedGatewayProcesses: 发送 SIGTERM 到 pid=\(pid)", name: "HermesGateway")
             kill(pid, SIGTERM)
         }
 
         let termDeadline = Date().addingTimeInterval(5)
+        var loggedRemaining = false
         while Date() < termDeadline {
             let remaining = pids.filter { kill($0, 0) == 0 }
-            if remaining.isEmpty { break }
+            if remaining.isEmpty {
+                DMLogger.log("killOrphanedGatewayProcesses: SIGTERM 后所有进程已退出，耗时 \(String(format: "%.3f", Date().timeIntervalSince(sigtermStart)))s", name: "HermesGateway")
+                break
+            }
+            if !loggedRemaining {
+                DMLogger.log("killOrphanedGatewayProcesses: SIGTERM 等待中，剩余 pid=\(remaining.sorted())", name: "HermesGateway")
+                loggedRemaining = true
+            }
             try? await Task.sleep(nanoseconds: 200_000_000)
         }
 
         // 超时未退出的强制 SIGKILL。
-        for pid in pids {
-            if kill(pid, 0) == 0 {
-                DMLogger.log("killOrphanedGatewayProcesses: pid=\(pid) 未退出，发送 SIGKILL", name: "HermesGateway")
+        let remaining = pids.filter { kill($0, 0) == 0 }
+        if !remaining.isEmpty {
+            let sigkillStart = Date()
+            DMLogger.log("killOrphanedGatewayProcesses: SIGTERM 超时，剩余 pid=\(remaining.sorted())，发送 SIGKILL", name: "HermesGateway")
+            for pid in remaining {
                 kill(pid, SIGKILL)
+            }
+
+            let killDeadline = Date().addingTimeInterval(3)
+            while Date() < killDeadline {
+                let stillAlive = remaining.filter { kill($0, 0) == 0 }
+                if stillAlive.isEmpty {
+                    DMLogger.log("killOrphanedGatewayProcesses: SIGKILL 后所有进程已退出，耗时 \(String(format: "%.3f", Date().timeIntervalSince(sigkillStart)))s", name: "HermesGateway")
+                    break
+                }
+                try? await Task.sleep(nanoseconds: 200_000_000)
             }
         }
 
-        let killDeadline = Date().addingTimeInterval(3)
-        while Date() < killDeadline {
-            let remaining = pids.filter { kill($0, 0) == 0 }
-            if remaining.isEmpty { break }
-            try? await Task.sleep(nanoseconds: 200_000_000)
-        }
-
-        let remaining = pids.filter { kill($0, 0) == 0 }
-        if !remaining.isEmpty {
-            DMLogger.log("killOrphanedGatewayProcesses: 以下进程未能终止: \(remaining.sorted())", name: "HermesGateway")
+        let finalRemaining = pids.filter { kill($0, 0) == 0 }
+        if !finalRemaining.isEmpty {
+            DMLogger.log("killOrphanedGatewayProcesses: 以下进程未能终止: \(finalRemaining.sorted())", name: "HermesGateway")
         } else {
-            DMLogger.log("killOrphanedGatewayProcesses: 所有残留进程已终止", name: "HermesGateway")
+            DMLogger.log("killOrphanedGatewayProcesses: 所有残留进程已终止，总耗时 \(String(format: "%.3f", Date().timeIntervalSince(start)))s", name: "HermesGateway")
         }
     }
 
     /// 等待指定端口释放。
     private func waitForPortRelease(port: Int, maxWait: TimeInterval) async {
+        let start = Date()
         let deadline = Date().addingTimeInterval(maxWait)
         while Date() < deadline {
             if !isPortInUse(port: port) {
-                DMLogger.log("waitForPortRelease: 端口 \(port) 已释放", name: "HermesGateway")
+                DMLogger.log("waitForPortRelease: 端口 \(port) 已释放，耗时 \(String(format: "%.3f", Date().timeIntervalSince(start)))s", name: "HermesGateway")
                 return
             }
             try? await Task.sleep(nanoseconds: 200_000_000)
@@ -508,9 +554,11 @@ final class HermesGatewayService {
 
     /// 通过 lsof 查找监听指定端口的进程并强制 SIGKILL。
     private func killListenersOnPort(port: Int) async {
-        let output = runShellSync(
+        let start = Date()
+        let output = await runShell(
             "lsof -iTCP:\(port) -sTCP:LISTEN -P -n | tail -n +2 | awk '{print $2}' || true"
         )
+        DMLogger.log("killListenersOnPort: lsof 耗时 \(String(format: "%.3f", Date().timeIntervalSince(start)))s，输出='\(output)'", name: "HermesGateway")
         var pids = Set<Int32>()
         for line in output.split(separator: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -532,7 +580,10 @@ final class HermesGatewayService {
         let deadline = Date().addingTimeInterval(3)
         while Date() < deadline {
             let remaining = pids.filter { kill($0, 0) == 0 }
-            if remaining.isEmpty { break }
+            if remaining.isEmpty {
+                DMLogger.log("killListenersOnPort: 所有监听进程已终止，耗时 \(String(format: "%.3f", Date().timeIntervalSince(start)))s", name: "HermesGateway")
+                break
+            }
             try? await Task.sleep(nanoseconds: 200_000_000)
         }
     }
@@ -645,22 +696,72 @@ final class HermesGatewayService {
         return bindResult != 0
     }
 
-    /// 同步执行 shell 命令并返回输出（用于诊断信息）。
-    private func runShellSync(_ command: String) -> String {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = ["-c", command]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            return String(data: data, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        } catch {
-            return "error: \(error)"
+    /// 异步执行 shell 命令并返回输出（用于诊断信息），支持超时终止，避免阻塞当前线程。
+    ///
+    /// 使用 FileHandle.readabilityHandler 异步累积输出，并在后台线程等待进程退出，
+    /// 超过 timeout 后自动 terminate()，防止 `waitUntilExit()` 永远阻塞。
+    private func runShell(_ command: String, timeout: TimeInterval = 10) async -> String {
+        let start = Date()
+        DMLogger.log("runShell: 开始，主线程=\(Thread.isMainThread ? "YES" : "NO")，cmd='\(command)'，timeout=\(timeout)s", name: "HermesGateway")
+
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let task = Process()
+                task.launchPath = "/bin/bash"
+                task.arguments = ["-c", command]
+                let pipe = Pipe()
+                task.standardOutput = pipe
+                task.standardError = pipe
+
+                var outputData = Data()
+                let outputLock = NSLock()
+                let pipeHandle = pipe.fileHandleForReading
+                pipeHandle.readabilityHandler = { handle in
+                    let data = handle.availableData
+                    outputLock.lock()
+                    if !data.isEmpty {
+                        outputData.append(data)
+                    }
+                    outputLock.unlock()
+                }
+
+                do {
+                    try task.run()
+                } catch {
+                    pipeHandle.readabilityHandler = nil
+                    DMLogger.log("runShell: 启动失败 error=\(error)，cmd='\(command)'", name: "HermesGateway")
+                    continuation.resume(returning: "error: \(error)")
+                    return
+                }
+
+                let group = DispatchGroup()
+                group.enter()
+                DispatchQueue.global(qos: .userInitiated).async {
+                    task.waitUntilExit()
+                    group.leave()
+                }
+
+                if group.wait(timeout: .now() + timeout) == .timedOut {
+                    DMLogger.log("runShell: 超时 \(timeout)s，终止任务 cmd='\(command)'", name: "HermesGateway")
+                    task.terminate()
+                    _ = group.wait(timeout: .now() + 2)
+                }
+
+                pipeHandle.readabilityHandler = nil
+                try? pipeHandle.close()
+
+                outputLock.lock()
+                let output = String(data: outputData, encoding: .utf8)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                outputLock.unlock()
+
+                let elapsed = Date().timeIntervalSince(start)
+                DMLogger.log(
+                    "runShell: 完成，耗时 \(String(format: "%.3f", elapsed))s，exit=\(task.terminationStatus)，主线程=\(Thread.isMainThread ? "YES" : "NO")，输出长度=\(output.count)",
+                    name: "HermesGateway"
+                )
+                continuation.resume(returning: output)
+            }
         }
     }
 }
